@@ -47,10 +47,10 @@ If `PANEL_TOKEN` is set, every `/api/*` call needs the token (header `x-panel-to
 | `AI_MEMORY_TURNS` | `8` | conversation turns kept per chat |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `silent` |
 | `HTML_UI_VARIANT` | `forwarded` | in-chat HTML game wrapper: `forwarded`, `clean`, `bare` |
-| `CORTANA_API` | empty | licence server base URL (Cloudflare Worker); empty means ungated local mode |
-| `LICENCE_KEY` | empty | licence key for this install |
+| `CORTANA_API` | empty | licence service base URL — provided with your copy |
+| `LICENCE_KEY` | empty | licence key for this install — provided with your copy |
 | `CHANNEL` | `stable` | release channel used by `update` |
-| `API_TIMEOUT_MS` | `15000` | licence and plan request timeout |
+| `API_TIMEOUT_MS` | `15000` | timeout for licence requests |
 | `CORTANA_HOME` | OS-specific | state folder override (`%LOCALAPPDATA%\CortanaMini` by default) |
 
 ---
@@ -123,15 +123,14 @@ The same pattern applies to `antimention`, `antileft`, `antispam`, `welcome`, `a
 3. Text uses the same rotating gradient backgrounds; media uses the group-status context.
 4. `.toallstatus all` posts everywhere with 1.2s pacing and reports posted/failed counts.
 
-### HTML games
+### Games
 
-`.slot` and `.wheel` send a **self-contained interactive HTML game inside the chat**, using the same HTML-primitive transport as the main MD bot. Reels, canvas spinning, payout logic and buttons all run client-side.
-
-- `.slot` — 3-reel machine with bet chips, payline and payout table
-- `.wheel` — canvas lucky wheel with history and spin stats
-- `.wheel option1 | option2 | option3` — custom wheel segments
-- If the HTML relay fails, the bot automatically sends its plain-text fallback.
-- Wrapper can be switched with `HTML_UI_VARIANT=forwarded|clean|bare`.
+- `.slot` — 3-reel spin with a jackpot / pair verdict
+- `.wheel` — spins a set of options, or numbers when none are given
+- `.wheel option1 | option2 | option3` — custom segments
+- `.truth` `.dare` — prompt cards
+- `.math` — arithmetic challenge with a spoiler answer
+- `.tictactoe` — plays in this chat; move with `.tictactoe 5` (1–9)
 
 ### Silent reaction commands
 
@@ -181,8 +180,6 @@ C:\Cortana_Mini\
     commands/              owner, group, downloader, sticker, ai, general, games, pranks
   docs/
     reference.md           this manual
-    updater-contract.md    app/state split, signed manifest, swap + rollback sequence
-    command-primitives.md  the twelve primitives every command plan is built from
   app.json                 Heroku manifest (worker dyno)
   Procfile                 worker: node start.js
   .env.example             every supported setting

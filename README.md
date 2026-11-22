@@ -22,27 +22,17 @@ npm install
 npm start
 ```
 
+## Pair it
+
 Type your number when asked — digits only, country code first — then enter the code it prints in
-**WhatsApp → Linked devices → Link with phone number**.
+**WhatsApp → Linked devices → Link with phone number**. That number becomes the bot's owner
+automatically.
 
-## Set it up
+## Configuration
 
-Settings live in `%LOCALAPPDATA%\CortanaMini\.env` on Windows, `~/.cortana-mini/.env` elsewhere.
-Not in this folder — updates replace this folder and never touch that one.
-
-Two lines are required. Without them the bot pairs and then answers every command with
-*"CORTANA IS OFFLINE"*, because commands are served, not built in.
-
-```ini
-CORTANA_API=https://api.thecortana.tech
-LICENCE_KEY=CM-XXXX-XXXX-XXXX
-```
-
-Optional:
-
-- `OWNER_NUMBERS` — only needed if you want to run owner commands from a number **other than** the
-  paired one. Messages you send from the bot's own account already count as owner.
-- `PANEL_TOKEN` — protects the web panel on port 8099.
+Settings live in `%LOCALAPPDATA%\CortanaMini\.env` on Windows, `~/.cortana-mini/.env` elsewhere —
+not in this folder, so updates never touch them. Your copy of this bot comes with the values it
+needs; the panel on port 8099 shows the rest.
 
 ## Hosting
 
@@ -58,8 +48,6 @@ On hosts that wipe the disk between restarts, point `CORTANA_HOME` at a persiste
 ## Docs
 
 - [Reference manual](docs/reference.md) — commands, environment variables, panel, limits
-- [Updater contract](docs/updater-contract.md) — how updates are verified and applied
-- [Command primitives](docs/command-primitives.md) — the twelve building blocks
 
 <div align="center">
 
