@@ -123,7 +123,8 @@ process.on('uncaughtException', (error) => {
                     logger.warn(`update ${result.version} staged — stop the bot and run: node tools/apply-update.js`);
                 }
             } catch (error) {
-                logger.warn(`auto-update skipped: ${error.code || error.message}`);
+                const detail = [error.code, error.message].filter(Boolean).join(' · ');
+                logger.warn(`auto-update skipped: ${detail}`);
             }
         }, 30_000);
         if (timer.unref) timer.unref();

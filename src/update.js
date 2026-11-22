@@ -105,6 +105,37 @@ async function extract(zip, target) {
 
 const REQUIRED = ['start.js', 'package.json', path.join('src', 'config.js'), path.join('src', 'bot.js')];
 
+// Minimal stored/deflate zip reader used when the host has no unzip or tar.
+const UNZIP_SCRIPT = `
+const fs = require('fs'), zlib = require('zlib'), path = require('path');
+const [zipPath, outDir] = process.argv.slice(2);
+const buf = fs.readFileSync(zipPath);
+const eocd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+if (eocd < 0) throw new Error('not a zip file');
+const count = buf.readUInt16LE(eocd + 10);
+let off = buf.readUInt32LE(eocd + 16);
+for (let i = 0; i < count; i += 1) {
+  if (buf.readUInt32LE(off) !== 0x02014b50) break;
+  const method = buf.readUInt16LE(off + 10);
+  const compSize = buf.readUInt32LE(off + 20);
+  const nameLen = buf.readUInt16LE(off + 28);
+  const extraLen = buf.readUInt16LE(off + 30);
+  const commentLen = buf.readUInt16LE(off + 32);
+  const localOff = buf.readUInt32LE(off + 42);
+  const name = buf.toString('utf8', off + 46, off + 46 + nameLen);
+  off += 46 + nameLen + extraLen + commentLen;
+  if (name.endsWith('/')) { fs.mkdirSync(path.join(outDir, name), { recursive: true }); continue; }
+  const localNameLen = buf.readUInt16LE(localOff + 26);
+  const localExtraLen = buf.readUInt16LE(localOff + 28);
+  const start = localOff + 30 + localNameLen + localExtraLen;
+  const raw = buf.subarray(start, start + compSize);
+  const data = method === 0 ? raw : zlib.inflateRawSync(raw);
+  const target = path.join(outDir, name);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, data);
+}
+`;
+
 function verifyTree(dir) {
     for (const name of REQUIRED) {
         if (!fs.existsSync(path.join(dir, name))) {
@@ -123,6 +154,8 @@ async function extract(zip, target) {
         attempts.push(['tar', ['-xf', zip, '-C', target]]);
         attempts.push(['busybox', ['unzip', '-o', zip, '-d', target]]);
     }
+    // Last resort: unpack with Node itself, so a container without unzip/tar still works.
+    attempts.push([process.execPath, ['-e', UNZIP_SCRIPT, zip, target]]);
 
     let lastError = null;
     for (const [command, args] of attempts) {
@@ -144,8 +177,25 @@ async function extract(zip, target) {
     throw Object.assign(new Error(`could not unpack the release: ${lastError && lastError.message}`), { code: 'extract_failed' });
 }
 
+/** Staging must live on the same volume as the app folder, but panels mount only the app. */
+function stagingDir() {
+    const candidates = [
+        `${config.paths.root}.update-staging`,
+        path.join(config.paths.home, 'update', 'staging'),
+        path.join(config.paths.root, '.update-staging'),
+    ];
+    for (const dir of candidates) {
+        try {
+            fs.mkdirSync(dir, { recursive: true });
+            fs.accessSync(dir, fs.constants.W_OK);
+            return dir;
+        } catch { /* try the next location */ }
+    }
+    throw Object.assign(new Error('no writable staging directory'), { code: 'staging_unwritable' });
+}
+
 async function stage(zip, manifest) {
-    const staging = `${config.paths.root}.update-staging`;
+    const staging = stagingDir();
     fs.rmSync(staging, { recursive: true, force: true });
     fs.mkdirSync(staging, { recursive: true });
     await extract(zip, staging);
