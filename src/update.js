@@ -237,6 +237,12 @@ function pending() {
     }
 }
 
+function clearPending() {
+    try {
+        fs.rmSync(PENDING_FILE, { force: true });
+    } catch { /* best effort */ }
+}
+
 function isUsable(dir) {
     try {
         return REQUIRED.every((name) => fs.existsSync(path.join(dir, name)));
@@ -442,5 +448,6 @@ module.exports = {
     autoApply,
     repair,
     pending,
+    clearPending,
     PENDING_FILE,
 };

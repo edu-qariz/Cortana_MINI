@@ -124,6 +124,25 @@ process.on('uncaughtException', (error) => {
     logger.banner();
     // Put the last good build back if a previous swap left the folder incomplete.
     update.repair();
+
+    // A staged update left over from a previous run is applied before booting, so it
+    // never has to wait for someone to type a command.
+    const staged = update.pending();
+    if (staged && update.compareVersions(staged.version, config.version) > 0) {
+        try {
+            const applied = update.apply({ allowSelf: true });
+            if (applied.ok) {
+                logger.success(`applied staged ${applied.version} — restarting`);
+                process.exit(0);
+            }
+            logger.warn(`staged ${staged.version} not applied: ${applied.code}`);
+        } catch (error) {
+            logger.warn(`staged update failed: ${error.code || error.message}`);
+        }
+    } else if (staged) {
+        update.clearPending();
+        logger.info('discarded a staged update that is not newer than this build');
+    }
     logger.info(`version ${config.versionLabel} · node ${process.version} · ${config.timezone}`);
     logger.info(`state dir ${config.paths.home}`);
     logger.info(`env ${config.envSources.length ? config.envSources.join(', ') : `none found at ${config.paths.env}`}`);
