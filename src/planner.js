@@ -63,13 +63,19 @@ const unsupported = new Set();
 
 const planError = (code, message) => Object.assign(new Error(message || code), { code });
 
+const WHOLE_PLACEHOLDER = /^\{\{\s*([\w.]+)\s*\}\}$/;
+
 function resolve(value, vars) {
     if (typeof value === 'string') {
-        return value.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (whole, key) => {
-            const [id, ...rest] = key.split('.');
-            if (!(id in vars)) return whole;
-            const picked = rest.reduce((acc, part) => (acc == null ? acc : acc[part]), vars[id]);
-            return picked === undefined || picked === null ? whole : String(picked);
+        // A lone placeholder keeps the raw value, so plans can pass objects and buffers around.
+        const whole = value.match(WHOLE_PLACEHOLDER);
+        if (whole) {
+            const picked = pickVar(whole[1], vars);
+            return picked === undefined || picked === null ? value : picked;
+        }
+        return value.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (text, key) => {
+            const picked = pickVar(key, vars);
+            return picked === undefined || picked === null ? text : String(picked);
         });
     }
     if (Array.isArray(value)) return value.map((item) => resolve(item, vars));
@@ -77,6 +83,12 @@ function resolve(value, vars) {
         return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolve(item, vars)]));
     }
     return value;
+}
+
+function pickVar(key, vars) {
+    const [id, ...rest] = key.split('.');
+    if (!(id in vars)) return undefined;
+    return rest.reduce((acc, part) => (acc == null ? acc : acc[part]), vars[id]);
 }
 
 function withTimeout(promise, ms) {
@@ -117,6 +129,8 @@ function jidList(value) {
 function resolveSource(source, vars) {
     if (source.menu) {
         if (fs.existsSync(config.paths.menuImage)) return { buffer: fs.readFileSync(config.paths.menuImage), kind: 'image' };
+        const pool = Array.isArray(source.fallback) ? source.fallback.filter(Boolean) : [];
+        if (pool.length) return { url: pool[Math.floor(Math.random() * pool.length)], kind: 'image' };
         throw planError('missing_media', 'no menu image is set');
     }
     if (source.url) return { url: source.url, kind: 'image' };
@@ -601,6 +615,7 @@ async function runFor(ctx, def) {
             prefix: ctx.prefix,
             sender: ctx.senderNum || ctx.chat,
             senderJid: ctx.sender,
+            name: ctx.senderName || '',
             hour: new Date().getHours(),
             chatJid: ctx.chat,
             version: config.versionLabel,

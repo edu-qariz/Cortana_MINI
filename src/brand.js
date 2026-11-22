@@ -6,8 +6,11 @@ const BRAND = {
     newsletterJid: '120363424485406730@newsletter',
     newsletterName: 'CORTANA PRO MINI',
     serverMessageId: 143,
+    signature: '✦ 𝐂𝐎𝐑𝐓𝐀𝐍𝐀 𝐏𝐑𝐎 𝐌𝐈𝐍𝐈 ✦',
     footer: '©2026 t.me/techdepro',
 };
+
+const FOOTER_BLOCK = `${BRAND.signature}\nèdûqarîz · ${BRAND.footer}`;
 
 function brandContext(extra = {}) {
     return {
@@ -41,11 +44,11 @@ function branded(content) {
     return { ...content, contextInfo: { ...brandContext(), ...(content.contextInfo || {}) } };
 }
 
-/** Appends the footer once, so a reply is visibly branded. */
+/** Appends the brand block once, so every reply is visibly branded. */
 function withFooter(text) {
     const value = String(text || '');
     if (!value || value.includes(BRAND.footer)) return value;
-    return `${value}\n\n${BRAND.footer}`;
+    return `${value}\n\n${FOOTER_BLOCK}`;
 }
 
 module.exports = { BRAND, brandContext, brandedQuote, branded, withFooter };

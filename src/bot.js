@@ -23,6 +23,7 @@ const planner = require('./planner');
 const update = require('./update');
 const guards = require('./guards');
 const mediaTools = require('./media');
+const brand = require('./brand');
 const commandModules = require('./commands');
 const { TTLMap, SeenSet, RateLimiter, pruneAll, stats: cacheStats } = require('./cache');
 const {
@@ -208,9 +209,16 @@ async function maybeChatbot(ctx, text, isGroup) {    if (!text) return;
 }
 
 function buildContext({ msg, chat, sender, senderNum, isGroup, isOwner, isAdmin, isBotAdmin, settings, chatSettings }) {
+    const brandPayload = (content) => {
+        const payload = typeof content === 'string' ? { text: content } : { ...content };
+        if (typeof payload.text === 'string') payload.text = brand.withFooter(payload.text);
+        if (typeof payload.caption === 'string') payload.caption = brand.withFooter(payload.caption);
+        return brand.branded(payload);
+    };
+
     const reply = async (content, extra = {}) => {
         const started = Date.now();
-        const payload = typeof content === 'string' ? { text: content } : content;
+        const payload = brandPayload(content);
         const sent = await sock.sendMessage(chat, payload, { quoted: msg, ...extra });
         logger.outgoing({
             chat,
@@ -223,7 +231,7 @@ function buildContext({ msg, chat, sender, senderNum, isGroup, isOwner, isAdmin,
 
     const send = async (content, extra = {}) => {
         const started = Date.now();
-        const payload = typeof content === 'string' ? { text: content } : content;
+        const payload = brandPayload(content);
         const sent = await sock.sendMessage(chat, payload, extra);
         logger.outgoing({
             chat,
@@ -242,6 +250,7 @@ function buildContext({ msg, chat, sender, senderNum, isGroup, isOwner, isAdmin,
         chat,
         sender,
         senderNum,
+        senderName: String(msg.pushName || '').trim(),
         isGroup,
         isOwner,
         isAdmin,
