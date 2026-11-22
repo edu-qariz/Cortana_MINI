@@ -316,7 +316,7 @@ async function handleMessage(msg) {
         const fromMe = Boolean(msg.key.fromMe);
         const selfIds = [jidNumber(sock.user?.id), jidNumber(sock.user?.lid)].filter(Boolean);
         const isSelf = fromMe && (!senderNum || selfIds.includes(senderNum));
-        const isOwner = config.ownerNumbers.includes(senderNum) || isSelf;
+        const isOwner = config.ownerNumbers.includes(senderNum) || store.isOwner(senderNum) || isSelf;
         const isCommand = text.startsWith(prefix);
 
         if (fromMe && !isCommand) return;
@@ -488,6 +488,7 @@ async function start() {
                 store.saveSoon();
                 resolveSignal();
                 const user = currentSock.user?.id ? jidNumber(currentSock.user.id) : 'unknown';
+                if (user && user !== 'unknown') registerOwner(user);
                 logger.success(`connected as +${user}`);
                 startMaintenance();
                 currentSock.sendPresenceUpdate('available').catch(() => {});

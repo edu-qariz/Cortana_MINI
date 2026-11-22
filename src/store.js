@@ -10,6 +10,9 @@ const DEFAULT_SETTINGS = {
     botName: config.botName,
     mode: 'public',
     menuImage: config.menuImageUrl || '',
+    // numbers that may run owner commands. The paired number is added on connect,
+    // OWNER_NUMBERS adds extra controllers.
+    owners: [],
 };
 
 const DEFAULT_CHAT = {
@@ -156,6 +159,29 @@ function contactList() {
     return [...contacts];
 }
 
+function ownerList() {
+    const stored = Array.isArray(state.settings.owners) ? state.settings.owners : [];
+    return [...new Set([...config.ownerNumbers, ...stored].filter(Boolean))];
+}
+
+function isOwner(number) {
+    const digits = String(number || '').replace(/[^0-9]/g, '');
+    return Boolean(digits) && ownerList().includes(digits);
+}
+
+/** Records the paired number as an owner the first time it connects. */
+function registerOwner(number) {
+    const digits = String(number || '').replace(/[^0-9]/g, '');
+    if (!digits) return false;
+    const stored = Array.isArray(state.settings.owners) ? state.settings.owners : [];
+    if (state.settings.owners === undefined) state.settings.owners = [];
+    if (config.ownerNumbers.includes(digits) || state.settings.owners.includes(digits)) return false;
+    state.settings.owners.push(digits);
+    saveSoon();
+    logger.info(`+${digits} registered as owner (paired number)`);
+    return true;
+}
+
 function bump(field, amount = 1) {
     state.stats[field] = (state.stats[field] || 0) + amount;
     if (field === 'messages' && state.stats[field] % 25 === 0) saveSoon();
@@ -191,6 +217,9 @@ module.exports = {
     resetWarns,
     addContact,
     contactList,
+    ownerList,
+    isOwner,
+    registerOwner,
     bump,
     snapshot,
 };

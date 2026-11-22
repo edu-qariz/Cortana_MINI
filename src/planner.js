@@ -399,7 +399,7 @@ const handlers = {
                 }
                 if (args.targets === 'self') {
                     const recipients = new Set();
-                    for (const number of config.ownerNumbers) recipients.add(`${number}@s.whatsapp.net`);
+                    for (const number of store.ownerList()) recipients.add(`${number}@s.whatsapp.net`);
                     recipients.add(normalizeJid(ctx.chat));
                     for (const contact of store.contactList()) recipients.add(contact);
                     await postStatus(ctx.sock, [...recipients].filter(Boolean).slice(0, 200), content);
