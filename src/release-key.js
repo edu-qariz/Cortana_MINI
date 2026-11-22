@@ -9,9 +9,9 @@
 const crypto = require('crypto');
 
 const KEYS = {
-    // 'release-2026': `-----BEGIN PUBLIC KEY-----
-    // MCowBQYDK2VwAyEA...
-    // -----END PUBLIC KEY-----`,
+    'release-2026': `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEA1CUTODlGWfeQFb7er8ZsxGXDqs9n2UkWXdP0NFnqRQQ=
+-----END PUBLIC KEY-----`,
 };
 
 function inlineKey() {
