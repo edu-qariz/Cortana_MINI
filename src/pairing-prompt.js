@@ -3,11 +3,11 @@
 const readline = require('readline');
 const logger = require('./logger');
 
-const { C, art } = logger;
+const { C, art, c256 } = logger;
 const CYAN = C.brightCyan;
 const RED = C.brightRed;
-const GREEN = C.brightGreen;
-const YELLOW = C.yellow;
+const GREEN = (text) => c256(46, text);
+const YELLOW = (text) => c256(226, text);
 
 function width() {
     const columns = Number(process.stdout.columns) || 50;

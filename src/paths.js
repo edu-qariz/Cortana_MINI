@@ -13,6 +13,9 @@ function resolveHome() {
     if (explicit) return path.resolve(explicit);
     const localAppData = String(process.env.LOCALAPPDATA || '').trim();
     if (localAppData) return path.join(localAppData, 'CortanaMini');
+    // Containers often set HOME without a matching /etc/passwd entry, so prefer it.
+    const home = String(process.env.HOME || process.env.USERPROFILE || '').trim();
+    if (home) return path.join(home, '.cortana-mini');
     return path.join(os.homedir(), '.cortana-mini');
 }
 

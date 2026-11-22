@@ -250,9 +250,9 @@ async function dispatchCommand(ctx, name, args) {
     if (!licence.configured()) {
         return ctx.reply(
             '⚙️ *NOT CONFIGURED*\n\n'
-            + 'This install has no licence, so commands cannot run.\n\n'
-            + `Set \`CORTANA_API\` and \`LICENCE_KEY\` in:\n\`${config.paths.env}\`\n\n`
-            + 'then restart.'
+            + 'This install has no licence yet.\n\n'
+            + `put \`CORTANA_API\` and \`LICENCE_KEY\` in:\n\`${config.paths.env}\`\n\n`
+            + 'or add them as environment variables in your panel, then restart.'
         );
     }
 

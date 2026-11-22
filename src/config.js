@@ -31,6 +31,9 @@ const legacyEnv = loadDotEnv(legacyEnvFile);
 const fileEnv = { ...legacyEnv, ...homeEnv };
 
 const notices = [];
+const envSources = [];
+if (Object.keys(homeEnv).length > 0) envSources.push(homeEnvFile);
+if (Object.keys(legacyEnv).length > 0) envSources.push(`${legacyEnvFile} (deprecated)`);
 if (migration.moved.length) {
     notices.push(`moved ${migration.moved.join(', ')} out of the app folder into ${home}`);
 }
@@ -85,6 +88,7 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 
 module.exports = {
     paths,
     notices,
+    envSources,
     version: packageJson.version,
     versionLabel: `V${packageJson.version.split('.').slice(0, 2).join('.')}`,
     botName: env('BOT_NAME', 'CORTANA PRO MINI'),

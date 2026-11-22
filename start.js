@@ -73,11 +73,13 @@ process.on('uncaughtException', (error) => {
     logger.banner();
     logger.info(`version ${config.versionLabel} · node ${process.version} · ${config.timezone}`);
     logger.info(`state dir ${config.paths.home}`);
+    logger.info(`env ${config.envSources.length ? config.envSources.join(', ') : `none found at ${config.paths.env}`}`);
     for (const notice of config.notices) logger.warn(notice);
     logger.info(`prefix "${config.prefix}" · ${config.ownerNumbers.length} owner number(s) configured`);
     if (!licence.configured()) {
         logger.warn('no licence configured — commands will refuse to run');
         logger.warn(`add CORTANA_API and LICENCE_KEY to ${config.paths.env} and restart`);
+        logger.warn('or set them as environment variables in your panel');
     }
 
     const lock = acquireLock();
