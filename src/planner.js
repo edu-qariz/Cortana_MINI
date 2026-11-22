@@ -6,10 +6,14 @@ const config = require('./config');
 const licence = require('./licence');
 const logger = require('./logger');
 const mediaTools = require('./media');
+const ytdlp = require('./ytdlp');
+const ytdl = require('@distube/ytdl-core');
+const { resolveAudio, resolveVideo } = require('./media-api');
 const store = require('./store');
 const updateModule = require('./update');
 const {
     humanUptime,
+    humanBytes,
     quotedOf,
     findMedia,
     isViewOnce,
@@ -25,9 +29,35 @@ const STEP_TIMEOUT_MS = 20_000;
 const MAX_SCHEDULE_MS = 30 * 60_000;
 const MAX_SCHEDULES = 16;
 const DEFAULT_PROMPT_TTL_MS = 5 * 60_000;
+const DOWNLOAD_TIMEOUT_MS = 120_000;
+
+async function collectStream(stream, maxBytes, label) {
+    const chunks = [];
+    let size = 0;
+    let settled = false;
+    const timer = setTimeout(() => {
+        if (!settled) stream.destroy(new Error(`${label} timed out`));
+    }, DOWNLOAD_TIMEOUT_MS);
+    if (timer.unref) timer.unref();
+    try {
+        for await (const chunk of stream) {
+            size += chunk.length;
+            if (size > maxBytes) {
+                stream.destroy();
+                throw new Error(`${label} is too large (${humanBytes(size)})`);
+            }
+            chunks.push(chunk);
+        }
+        settled = true;
+        return Buffer.concat(chunks);
+    } finally {
+        clearTimeout(timer);
+    }
+}
 
 const pending = new Map();
 const schedules = new Map();
+const history = new Map();
 const unsupported = new Set();
 
 const planError = (code, message) => Object.assign(new Error(message || code), { code });
@@ -231,6 +261,10 @@ const handlers = {
         if (target === 'image') return { buffer: await mediaTools.toImage(ref.buffer), kind: 'image', mimetype: 'image/png' };
         if (target === 'audio') return { buffer: await mediaTools.toMp3(ref.buffer), kind: 'audio', mimetype: 'audio/mpeg' };
         if (target === 'sticker') return { buffer: await mediaTools.toSticker(ref.buffer), kind: 'sticker', mimetype: 'image/webp' };
+        if (target === 'tempo') {
+            const rate = Math.min(2, Math.max(0.5, Number(args.rate) || 1));
+            return { buffer: await mediaTools.changeTempo(ref.buffer, rate), kind: 'audio', mimetype: 'audio/mpeg' };
+        }
         throw planError('unsupported_transform', `transform.${target} is not implemented`);
     },
 
@@ -322,6 +356,41 @@ const handlers = {
                 const extension = ref.kind === 'sticker' ? 'webp' : ref.kind === 'video' ? 'mp4' : ref.kind === 'image' ? 'jpg' : 'bin';
                 const url = await mediaTools.uploadCatbox(ref.buffer, `cortana-mini.${extension}`);
                 return { url, bytes: ref.buffer.length };
+            }
+            case 'ytdl': {
+                const url = String(args.url || '');
+                if (!/^https?:\/\//i.test(url)) throw planError('bad_url', 'not a media url');
+                if (args.mode === 'audio') {
+                    const fromYtdlp = await ytdlp.downloadAudio(url).catch(() => null);
+                    if (fromYtdlp) {
+                        await ctx.sock.sendMessage(ctx.chat, { audio: fromYtdlp, mimetype: 'audio/mpeg', fileName: args.fileName || 'audio.mp3', ptt: false });
+                        return { ok: true, via: 'yt-dlp' };
+                    }
+                    const resolved = await resolveAudio(url).catch(() => null);
+                    if (resolved?.url) {
+                        await ctx.reply({ audio: { url: resolved.url }, mimetype: 'audio/mpeg', fileName: args.fileName || 'audio.mp3', ptt: false });
+                        return { ok: true, via: 'resolver' };
+                    }
+                    const stream = ytdl(url, { filter: 'audioonly', quality: 'highestaudio', highWaterMark: 1 << 25 });
+                    const raw = await collectStream(stream, config.maxMediaBytes, 'audio');
+                    const mp3 = await mediaTools.toMp3(raw);
+                    await ctx.sock.sendMessage(ctx.chat, { audio: mp3, mimetype: 'audio/mpeg', fileName: args.fileName || 'audio.mp3', ptt: false });
+                    return { ok: true, via: 'ytdl' };
+                }
+                const fromYtdlp = await ytdlp.downloadVideo(url).catch(() => null);
+                if (fromYtdlp) {
+                    await ctx.sock.sendMessage(ctx.chat, { video: fromYtdlp, mimetype: 'video/mp4', caption: args.caption });
+                    return { ok: true, via: 'yt-dlp' };
+                }
+                const resolved = await resolveVideo(url).catch(() => null);
+                if (resolved?.url) {
+                    await ctx.reply({ video: { url: resolved.url }, mimetype: 'video/mp4', caption: args.caption });
+                    return { ok: true, via: 'resolver' };
+                }
+                const stream = ytdl(url, { filter: 'audioandvideo', quality: '18', highWaterMark: 1 << 25 });
+                const buffer = await collectStream(stream, config.maxMediaBytes, 'video');
+                await ctx.sock.sendMessage(ctx.chat, { video: buffer, mimetype: 'video/mp4', caption: args.caption });
+                return { ok: true, via: 'ytdl' };
             }
             case 'status': {
                 const content = args.content && typeof args.content === 'object' ? args.content : { text: String(args.text || '') };
@@ -467,7 +536,7 @@ async function run(ctx, plan) {
             throw error;
         }
     }
-    return true;
+    return vars;
 }
 
 function quotedSummary(ctx) {
@@ -530,6 +599,43 @@ async function runFor(ctx, def) {
     }
 }
 
+async function chatReply(ctx, text) {
+    if (!licence.configured() || !text) return null;
+
+    const perChat = history.get(ctx.chat) || [];
+    const result = await licence.planFor(
+        'chatbot',
+        [text],
+        {
+            group: ctx.isGroup,
+            owner: ctx.isOwner,
+            prefix: ctx.prefix,
+            sender: ctx.senderNum || ctx.chat,
+            chatJid: ctx.chat,
+            version: config.versionLabel,
+            settings: { ...store.getSettings() },
+            chat: { ...store.getChat(ctx.chat) },
+            quoted: quotedSummary(ctx),
+            history: perChat.slice(-8),
+        }
+    );
+    if (!result.ok || result.data.unsupported) return null;
+
+    const vars = await run(ctx, result.data);
+    const replyText = result.data.steps
+        .map((step) => (step.use === 'say' ? vars[step.id] : null))
+        .filter(Boolean)
+        .map((entry) => entry.text)
+        .filter(Boolean)
+        .pop();
+    if (replyText) {
+        perChat.push({ role: 'user', content: String(text).slice(0, 1000) });
+        perChat.push({ role: 'assistant', content: String(replyText).slice(0, 1500) });
+        history.set(ctx.chat, perChat.slice(-10));
+    }
+    return replyText || null;
+}
+
 // Feeds a non-command message to a waiting prompt. Returns true when consumed.
 function consume(ctx, text) {
     const entry = pending.get(ctx.chat);
@@ -550,6 +656,7 @@ function consume(ctx, text) {
 module.exports = {
     run,
     runFor,
+    chatReply,
     consume,
     handlers,
     resolve,

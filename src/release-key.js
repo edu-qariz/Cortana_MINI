@@ -1,11 +1,11 @@
 'use strict';
 
 // Public keys that may sign a release manifest. Private keys never ship: they live
-// in tools/keys/ (git-ignored) or CI secrets and are used by tools/sign-manifest.js.
+// in the private server repository (tools/keys/, git-ignored) or CI secrets.
 //
-// After running `node tools/keygen.js release`, paste the contents of
-// tools/keys/release-public.pem below as a template literal. CORTANA_RELEASE_KEY
-// overrides it at runtime, which is how tests and key rotation use it.
+// After generating a keypair there with `node tools/keygen.js release`, paste the
+// public key below as a template literal. CORTANA_RELEASE_KEY overrides it at
+// runtime, which is how tests and key rotation use it.
 const crypto = require('crypto');
 
 const KEYS = {

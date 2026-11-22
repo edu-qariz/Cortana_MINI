@@ -1,17 +1,5 @@
 'use strict';
 
-require('./core');
-require('./owner');
-require('./group');
-require('./downloader');
-require('./sticker');
-require('./general');
-require('./games');
-require('./pranks');
-
-const ai = require('./ai');
-
-module.exports = {
-    generateReply: ai.generateReply,
-    hasAnyKey: ai.hasAnyKey,
-};
+// Importing this module registers every command name and alias. Behaviour lives on
+// the licence server, so there is nothing else to export.
+require('./catalogue');

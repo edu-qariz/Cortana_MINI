@@ -150,9 +150,12 @@ Prefix is `.` by default. Anything that needs arguments replies with its own usa
 ## 📚 Docs
 
 - [Reference manual](docs/reference.md) — every env var, panel endpoint, guard and limit
-- [Worker deploy guide](docs/worker-deploy.md) — D1, KV, secrets, first licence, publishing a release
 - [Updater contract](docs/updater-contract.md) — app/state split, signed releases, rollback
 - [Command primitives](docs/command-primitives.md) — the twelve building blocks of a plan
+
+This repository is the client only: transport, licence check, plan executor and updater. Command
+logic is served from a private licence API, so the bot needs `CORTANA_API` and `LICENCE_KEY` in its
+state-folder `.env` to answer commands.
 
 <div align="center">
 

@@ -1,8 +1,6 @@
 node_modules/
 .env
-.dev.vars
-.github-token
-.wrangler/
+# signing keys and release tooling live in the private server repository
 tools/keys/
 *.pem
 # legacy runtime folders; state now lives in %LOCALAPPDATA%\CortanaMini

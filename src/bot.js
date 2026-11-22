@@ -155,7 +155,7 @@ async function handleRevoke(msg, chat, protocol) {
 }
 
 async function maybeChatbot(ctx, text, isGroup) {
-    if (!text || !commandModules.hasAnyKey()) return;
+    if (!text) return;
     if (isGroup) {
         const info = ctx.msg.message?.extendedTextMessage?.contextInfo
             || ctx.msg.message?.imageMessage?.contextInfo
@@ -166,8 +166,7 @@ async function maybeChatbot(ctx, text, isGroup) {
         if (!mentioned.some((id) => selfIds.includes(id)) && !nameCalled) return;
     }
     try {
-        const answer = await commandModules.generateReply(ctx.chat, text);
-        if (answer) await ctx.reply(answer.slice(0, 3500));
+        await planner.chatReply(ctx, text);
     } catch (error) {
         logger.warn(`chatbot reply failed: ${error.message}`);
     }
@@ -269,6 +268,14 @@ async function dispatchCommand(ctx, name, args) {
         if (await planner.runFor(ctx, def)) return;
     } catch (error) {
         logger.error(`plan.${def.name}`, error);
+    }
+
+    if (def.remoteOnly) {
+        return ctx.reply(
+            '📡 *CORTANA IS OFFLINE*\n\n'
+            + 'The command service did not answer, so nothing ran.\n'
+            + 'Check your connection and try again in a moment.'
+        ).catch(() => {});
     }
 
     try {
