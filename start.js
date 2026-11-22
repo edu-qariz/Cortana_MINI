@@ -78,8 +78,10 @@ process.on('uncaughtException', (error) => {
     logger.info(`prefix "${config.prefix}" · ${config.ownerNumbers.length} owner number(s) configured`);
     if (!licence.configured()) {
         logger.warn('no licence configured — commands will refuse to run');
-        logger.warn(`add CORTANA_API and LICENCE_KEY to ${config.paths.env} and restart`);
-        logger.warn('or set them as environment variables in your panel');
+        logger.warn(`create ${config.paths.env} with these two lines:`);
+        logger.warn('  CORTANA_API=https://api.thecortana.tech');
+        logger.warn(`  LICENCE_KEY=CM-XXXX-XXXX-XXXX   (ask for your key)`);
+        logger.warn('then restart the server');
     }
 
     const lock = acquireLock();

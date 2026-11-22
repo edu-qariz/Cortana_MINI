@@ -12,6 +12,7 @@ const CACHE_FILE = path.join(config.paths.home, 'license.json');
 const REFRESH_WINDOW_MS = 120_000;
 
 let token = '';
+let cachedKey = '';
 let payload = null;
 let lastError = null;
 let inflight = null;
@@ -39,6 +40,7 @@ function load() {
             token = cached.token;
             payload = decode(token);
         }
+        if (typeof cached.licence === 'string') cachedKey = cached.licence;
     } catch { /* first run, or a corrupt cache the next verify will replace */ }
 }
 
@@ -46,7 +48,7 @@ function save() {
     try {
         fs.writeFileSync(
             CACHE_FILE,
-            `${JSON.stringify({ token, device: deviceId(), savedAt: new Date().toISOString() }, null, 2)}\n`,
+            `${JSON.stringify({ token, licence: cachedKey, device: deviceId(), savedAt: new Date().toISOString() }, null, 2)}\n`,
             'utf8'
         );
     } catch (error) {
@@ -54,7 +56,7 @@ function save() {
     }
 }
 
-const configured = () => Boolean(config.apiBaseUrl && config.licenceKey);
+const configured = () => Boolean(config.apiBaseUrl);
 const timeLeft = () => (payload ? payload.exp * 1000 - Date.now() : 0);
 
 async function ensure({ force = false } = {}) {
@@ -64,10 +66,16 @@ async function ensure({ force = false } = {}) {
 
     inflight = (async () => {
         try {
-            const data = await api.post('/v1/licence/verify', {
-                licence: config.licenceKey,
-                device: deviceId(),
-            });
+            let key = config.licenceKey || cachedKey;
+            if (!key) {
+                // No key configured: let the service issue one bound to this device.
+                const issued = await api.post('/v1/licence/auto', { device: deviceId() });
+                key = String(issued.licence || '');
+                if (!key) throw new api.ApiError('licence_bad_response', 'server returned no licence');
+                cachedKey = key;
+                save();
+            }
+            const data = await api.post('/v1/licence/verify', { licence: key, device: deviceId() });
             const fresh = String(data.token || '');
             const decoded = decode(fresh);
             if (!decoded) throw new api.ApiError('licence_bad_token', 'server returned an unusable token');
@@ -118,6 +126,7 @@ async function planFor(command, args, context) {
 
 function reset() {
     token = '';
+    cachedKey = '';
     payload = null;
     lastError = null;
     try {
@@ -129,6 +138,7 @@ function status() {
     return {
         configured: configured(),
         device: deviceId(),
+        licence: cachedKey ? `${cachedKey.slice(0, 6)}…` : null,
         plan: payload ? payload.plan : null,
         expiresAt: payload ? new Date(payload.exp * 1000).toISOString() : null,
         secondsLeft: payload ? Math.max(0, Math.round(timeLeft() / 1000)) : 0,

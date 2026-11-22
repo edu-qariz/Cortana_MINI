@@ -98,7 +98,8 @@ module.exports = {
     ownerNumbers,
     port: num('PORT', 8099),
     panelToken: env('PANEL_TOKEN', ''),
-    apiBaseUrl: env('CORTANA_API', '').replace(/\/+$/, ''),
+    // Baked in so a fresh install works with no configuration at all.
+    apiBaseUrl: (env('CORTANA_API', 'https://api.thecortana.tech') || '').replace(/\/+$/, ''),
     licenceKey: env('LICENCE_KEY', ''),
     channel: env('CHANNEL', 'stable'),
     apiTimeoutMs: num('API_TIMEOUT_MS', 15000),
