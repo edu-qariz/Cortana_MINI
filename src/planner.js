@@ -548,7 +548,23 @@ const handlers = {
         );
 
         try {
-            await ctx.sock.relayMessage(ctx.chat, built.message, { messageId: built.key.id });
+            // Native flow buttons are dropped unless the stanza carries the biz node.
+            await ctx.sock.relayMessage(ctx.chat, built.message, {
+                messageId: built.key.id,
+                additionalNodes: [
+                    {
+                        tag: 'biz',
+                        attrs: {},
+                        content: [
+                            {
+                                tag: 'interactive',
+                                attrs: { type: 'native_flow', v: '1' },
+                                content: [{ tag: 'native_flow', attrs: { v: '9', name: 'mixed' } }],
+                            },
+                        ],
+                    },
+                ],
+            });
             logger.outgoing({ chat: ctx.chat, kind: 'select', preview: buttonTitle, ms: 0 });
             return { ok: true, rows: rows.length };
         } catch (error) {
@@ -576,6 +592,7 @@ const handlers = {
         const data = source.buffer || { url: source.url };
         const payload = mediaPayload(kind, data, args, source.caption);
         if (payload.caption) payload.caption = brand.withFooter(payload.caption);
+        if (args.channel) payload.contextInfo = { ...(payload.contextInfo || {}), ...brand.channelContext() };
         const target = args.to ? normalizeJid(args.to) || args.to : null;
         if (target && target !== ctx.chat) {
             await ctx.sock.sendMessage(target, payload);

@@ -9,6 +9,22 @@ const BRAND = {
 
 const FOOTER_BLOCK = `${BRAND.signature}\nèdûqarîz · ${BRAND.footer}`;
 
+// Only the menu wears the channel chip. Everything else stays clean.
+const CHANNEL = {
+    newsletterJid: '120363424485406730@newsletter',
+    newsletterName: 'CORTANA PRO MINI',
+    serverMessageId: 143,
+};
+
+/** Newsletter context, opt-in per message (menu only). */
+function channelContext() {
+    return {
+        isForwarded: true,
+        forwardingScore: 999,
+        forwardedNewsletterMessageInfo: { ...CHANNEL },
+    };
+}
+
 /** Replies ship untouched — no forwarding, no channel card, no badge. */
 function branded(content) {
     return content;
@@ -38,4 +54,4 @@ function withFooter(text) {
     return `${value}\n\n${FOOTER_BLOCK}`;
 }
 
-module.exports = { BRAND, fakeQuote, brandedQuote, branded, withFooter };
+module.exports = { BRAND, CHANNEL, channelContext, fakeQuote, brandedQuote, branded, withFooter };
