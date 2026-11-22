@@ -293,6 +293,54 @@ function lockIsAlive() {
     }
 }
 
+const PROGRAM_ENTRIES = ['start.js', 'package.json', 'package-lock.json', 'src', 'tools', 'app.json', 'Procfile', 'README.md', 'LICENSE', '.env.example'];
+const RENAME_IMPOSSIBLE = new Set(['EROFS', 'EPERM', 'EACCES', 'EBUSY', 'EXDEV', 'ENOTEMPTY']);
+
+/**
+ * Panels mount the app folder as the volume root, so it can never be renamed.
+ * Copy the program files over the live folder instead, keeping a backup of what
+ * was replaced. Runtime state is never part of PROGRAM_ENTRIES.
+ */
+function applyInPlace(ready) {
+    const app = config.paths.root;
+    const backup = path.join(UPDATE_DIR, `backup-${ready.version}`);
+    fs.rmSync(backup, { recursive: true, force: true });
+    fs.mkdirSync(backup, { recursive: true });
+
+    for (const entry of PROGRAM_ENTRIES) {
+        const from = path.join(app, entry);
+        if (fs.existsSync(from)) fs.cpSync(from, path.join(backup, entry), { recursive: true });
+    }
+
+    try {
+        for (const entry of PROGRAM_ENTRIES) {
+            const from = path.join(ready.staging, entry);
+            if (!fs.existsSync(from)) continue;
+            const to = path.join(app, entry);
+            fs.rmSync(to, { recursive: true, force: true });
+            fs.cpSync(from, to, { recursive: true });
+        }
+        verifyTree(app);
+    } catch (error) {
+        for (const entry of PROGRAM_ENTRIES) {
+            const from = path.join(backup, entry);
+            if (!fs.existsSync(from)) continue;
+            const to = path.join(app, entry);
+            fs.rmSync(to, { recursive: true, force: true });
+            fs.cpSync(from, to, { recursive: true });
+        }
+        throw Object.assign(new Error(`in-place update failed and was rolled back: ${error.message}`), { code: 'in_place_failed' });
+    }
+
+    fs.rmSync(PENDING_FILE, { force: true });
+    fs.rmSync(ready.staging, { recursive: true, force: true });
+    try {
+        fs.rmSync(path.join(config.paths.data, 'instance.lock'), { force: true });
+    } catch { /* best effort */ }
+    logger.success(`updated to ${ready.version} in place — backup at ${backup}`);
+    return { ok: true, app, previous: backup, version: ready.version, depsChanged: ready.depsChanged, mode: 'in-place' };
+}
+
 /** Swaps the staged folder in. Must run with the bot stopped — see tools/apply-update.js. */
 function apply({ allowSelf = false } = {}) {
     const ready = pending();
@@ -314,11 +362,24 @@ function apply({ allowSelf = false } = {}) {
         // Release our own lock first so the restarted process does not see a stale PID.
         fs.rmSync(path.join(config.paths.data, 'instance.lock'), { force: true });
     } catch { /* best effort */ }
-    fs.renameSync(app, previous);
+
+    // A panel mounts the app folder itself, so the rename below can never work there:
+    // fall back to copying the program files over the live folder.
+    try {
+        fs.renameSync(app, previous);
+    } catch (error) {
+        if (!RENAME_IMPOSSIBLE.has(error.code)) throw error;
+        logger.debug(`cannot rename the app folder (${error.code}) — updating in place`);
+        return applyInPlace(ready);
+    }
+
     try {
         fs.renameSync(ready.staging, app);
     } catch (error) {
-        fs.renameSync(previous, app);
+        try {
+            fs.renameSync(previous, app);
+        } catch { /* the copy fallback below is the second chance */ }
+        if (RENAME_IMPOSSIBLE.has(error.code)) return applyInPlace(ready);
         throw error;
     }
 
@@ -377,6 +438,7 @@ module.exports = {
     download,
     stage,
     apply,
+    applyInPlace,
     autoApply,
     repair,
     pending,
