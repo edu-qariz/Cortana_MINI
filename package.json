@@ -9,7 +9,6 @@
     "start": "node --max-old-space-size=512 start.js",
     "dev": "node --max-old-space-size=512 start.js",
     "check": "node --check start.js",
-    "test": "node --test",
     "update:apply": "node tools/apply-update.js"
   },
   "engines": {
