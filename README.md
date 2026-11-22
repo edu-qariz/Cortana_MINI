@@ -30,13 +30,19 @@ Type your number when asked — digits only, country code first — then enter t
 Settings live in `%LOCALAPPDATA%\CortanaMini\.env` on Windows, `~/.cortana-mini/.env` elsewhere.
 Not in this folder — updates replace this folder and never touch that one.
 
+Two lines are required. Without them the bot pairs and then answers every command with
+*"CORTANA IS OFFLINE"*, because commands are served, not built in.
+
 ```ini
-OWNER_NUMBERS=254712345678
 CORTANA_API=https://api.thecortana.tech
 LICENCE_KEY=CM-XXXX-XXXX-XXXX
 ```
 
-`PANEL_TOKEN` is worth setting too if you expose the web panel on port 8099.
+Optional:
+
+- `OWNER_NUMBERS` — only needed if you want to run owner commands from a number **other than** the
+  paired one. Messages you send from the bot's own account already count as owner.
+- `PANEL_TOKEN` — protects the web panel on port 8099.
 
 ## Hosting
 
