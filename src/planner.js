@@ -314,17 +314,6 @@ const handlers = {
         const jid = args.jid || ctx.chat;
         const targets = jidList(args.jids);
         switch (args.op) {
-            case 'kick':
-            case 'add':
-            case 'promote':
-            case 'demote': {
-                const action = { kick: 'remove', add: 'add', promote: 'promote', demote: 'demote' }[args.op];
-                await ctx.sock.groupParticipantsUpdate(jid, targets, action);
-                return { ok: true, count: targets.length };
-            }
-            case 'subject':
-                await ctx.sock.groupUpdateSubject(jid, String(args.text || ''));
-                return { ok: true };
             case 'description':
                 await ctx.sock.groupUpdateDescription(jid, String(args.text || ''));
                 return { ok: true };
