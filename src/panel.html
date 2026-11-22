@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CORTANA PRO MINI V2.3 · panel</title>
+<style>
+  :root {
+    --bg: #070a12;
+    --card: #0d1322;
+    --line: #1e2a44;
+    --text: #e7ecf7;
+    --dim: #8190ad;
+    --cyan: #4de3ff;
+    --pink: #ff5cc8;
+    --green: #39e58c;
+    --red: #ff5d6c;
+    --amber: #ffc857;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(1200px 600px at 15% -10%, #14203a 0%, var(--bg) 55%);
+    color: var(--text);
+    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
+    padding: 12px 14px; border-bottom: 1px solid var(--line);
+    background: rgba(7, 10, 18, 0.78); backdrop-filter: blur(8px); position: sticky; top: 0; z-index: 5;
+  }
+  h1 { margin: 0; font-size: 15px; letter-spacing: 0.3px; }
+  h1 span { color: var(--cyan); }
+  .badge { font-size: 10px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
+  main {
+    display: grid; gap: 12px; padding: 12px; max-width: 1200px; margin: 0 auto;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  section {
+    background: linear-gradient(180deg, #101a2c 0%, var(--card) 100%);
+    border: 1px solid var(--line); border-radius: 12px; padding: 13px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    min-width: 0;
+  }
+  section h2 { margin: 0 0 12px; font-size: 12px; letter-spacing: 1.4px; color: var(--dim); text-transform: uppercase; }
+  .row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px dashed rgba(30, 42, 68, 0.6); }
+  .row:last-child { border-bottom: 0; }
+  .row span:first-child { color: var(--dim); }
+  .ok { color: var(--green); }
+  .bad { color: var(--red); }
+  .warn { color: var(--amber); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 7px; background: var(--red); box-shadow: 0 0 10px currentColor; }
+  .dot.on { background: var(--green); }
+  form { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  input, button {
+    font: inherit; border-radius: 9px; border: 1px solid var(--line);
+    background: #0a1120; color: var(--text); padding: 9px 12px; outline: none;
+  }
+  input:focus { border-color: var(--cyan); }
+  input.grow { flex: 1; min-width: 150px; }
+  button { cursor: pointer; background: #14233c; }
+  button:hover { border-color: var(--cyan); }
+  button.primary { background: linear-gradient(135deg, #1b4e6b, #29407a); border-color: #2b6b8f; }
+  button.danger { border-color: #6b2430; background: #2a1016; }
+  pre {
+    margin: 0; white-space: pre-wrap; word-break: break-word; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace;
+    max-height: 340px; overflow: auto;
+  }
+  #code {
+    font-size: clamp(22px, 8vw, 30px); letter-spacing: clamp(2px, 1vw, 5px);
+    color: var(--cyan); text-align: center; padding: 8px 0 2px;
+    font-weight: 700; user-select: all; word-break: break-all;
+  }
+  #code-meta { text-align: center; font-size: 11px; color: var(--dim); min-height: 16px; }
+  #logs { max-height: 300px; overflow: auto; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+  .ev { padding: 3px 6px; border-radius: 4px; border-left: 2px solid var(--line); }
+  .ev.in { border-color: var(--cyan); }
+  .ev.out { border-color: var(--green); }
+  .ev.error { border-color: var(--red); color: #ffb3b9; }
+  .ev.cmd { border-color: var(--pink); }
+  .ev .t { color: var(--dim); margin-right: 6px; }
+  .muted { color: var(--dim); font-size: 12px; }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #101c30; border: 1px solid var(--line); color: var(--dim); }
+  .menu-wrap { max-height: 420px; overflow: auto; }
+  .span-2 { grid-column: span 1; }
+  @media (min-width: 900px) {
+    main { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 20px 24px 40px; gap: 16px; }
+    .span-2 { grid-column: span 2; }
+    h1 { font-size: 18px; }
+  }
+  @media (max-width: 480px) {
+    .row { font-size: 12px; }
+    input, button { padding: 8px 10px; font-size: 13px; }
+    #logs { max-height: 220px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>ᯓ <span>CORTANA PRO MINI</span> <span class="badge" id="version">V2.3</span></h1>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+    <span class="pill" id="conn"><span class="dot" id="dot"></span><span id="conn-text">connecting…</span></span>
+    <span class="pill" id="uptime">uptime 0s</span>
+    <span class="pill">©2026 t.me/techdepro</span>
+    <input id="token" placeholder="panel token (optional)" style="width:190px" />
+  </div>
+</header>
+
+<main>
+  <section>
+    <h2>runtime</h2>
+    <div class="row"><span>account</span><span id="user">—</span></div>
+    <div class="row"><span>mode</span><span id="mode">—</span></div>
+    <div class="row"><span>prefix</span><span id="prefix">—</span></div>
+    <div class="row"><span>commands</span><span id="cmds">—</span></div>
+    <div class="row"><span>memory</span><span id="mem">—</span></div>
+    <div class="row"><span>messages / cmds</span><span id="stats">—</span></div>
+    <div class="row"><span>pid</span><span id="pid">—</span></div>
+    <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap">
+      <button id="restart" class="primary">↻ restart</button>
+      <button id="logout" class="danger">⏏ logout / re-pair</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>📱 now input your number to pair</h2>
+    <p class="muted">1. Open WhatsApp → Linked devices → Link with phone number first.<br>2. Then generate the code here and type it within 60 seconds.</p>
+    <form id="pair-form">
+      <input id="phone" class="grow" placeholder="254712345678" inputmode="numeric" autocomplete="tel" />
+      <button class="primary" type="submit">generate code</button>
+    </form>
+    <div id="code"></div>
+    <div id="code-meta"></div>
+    <div id="code-actions" style="display:none; gap:8px; margin-top:4px; flex-wrap:wrap">
+      <button id="copy-code" type="button">copy code</button>
+      <button id="regen" type="button">new code</button>
+    </div>
+    <p class="muted" id="pair-hint">The code is 8 characters. Type letters and digits only — no hyphen, no spaces.</p>
+    <p class="muted" id="custom-hint"></p>
+  </section>
+
+  <section class="span-2">
+    <h2>command grid</h2>
+    <div class="menu-wrap"><pre id="menu">loading…</pre></div>
+  </section>
+
+  <section class="span-2">
+    <h2>live console</h2>
+    <div id="logs"></div>
+  </section>
+</main>
+
+<script>
+  var tokenInput = document.getElementById('token');
+  tokenInput.value = localStorage.getItem('cortana-token') || '';
+  tokenInput.addEventListener('change', function () {
+    localStorage.setItem('cortana-token', tokenInput.value.trim());
+    location.reload();
+  });
+
+  function q() { return localStorage.getItem('cortana-token') || ''; }
+  function api(path, options) {
+    options = options || {};
+    options.headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
+    var token = q();
+    if (token) options.headers['x-panel-token'] = token;
+    return fetch(path, options);
+  }
+  var lastCode = '';
+  var pairExpiresAt = 0;
+  var pairTimer = null;
+  var customCode = '';
+
+  function stopCountdown() {
+    if (pairTimer) { clearInterval(pairTimer); pairTimer = null; }
+  }
+
+  function startCountdown(ms) {
+    stopCountdown();
+    pairExpiresAt = Date.now() + (ms || 60000);
+    function tick() {
+      var left = Math.max(0, Math.ceil((pairExpiresAt - Date.now()) / 1000));
+      var meta = document.getElementById('code-meta');
+      if (left <= 0) {
+        meta.textContent = 'expired — generate a new code';
+        setText('code', 'EXPIRED');
+        document.getElementById('code-actions').style.display = 'none';
+        stopCountdown();
+        return;
+      }
+      meta.textContent = 'expires in ' + left + 's · type ' + (customCode || 'the code') + ' with no hyphen';
+    }
+    tick();
+    pairTimer = setInterval(tick, 1000);
+  }
+
+  function fmtUptime(ms) {
+    var s = Math.floor((ms || 0) / 1000);
+    var d = Math.floor(s / 86400); s -= d * 86400;
+    var h = Math.floor(s / 3600); s -= h * 3600;
+    var m = Math.floor(s / 60); s -= m * 60;
+    var out = [];
+    if (d) out.push(d + 'd');
+    if (h) out.push(h + 'h');
+    if (m) out.push(m + 'm');
+    out.push(s + 's');
+    return out.join(' ');
+  }
+  function setText(id, value) { document.getElementById(id).textContent = value; }
+
+  async function refresh() {
+    try {
+      var res = await api('/api/status');
+      if (res.status === 401) { setText('conn-text', 'token required'); document.getElementById('dot').className = 'dot'; return; }
+      var data = await res.json();
+      var on = data.connected;
+      document.getElementById('dot').className = 'dot' + (on ? ' on' : '');
+      setText('conn-text', on ? 'connected' : 'offline');
+      setText('user', data.user ? '+' + data.user : '—');
+      setText('mode', data.mode);
+      setText('prefix', data.prefix);
+      setText('cmds', data.commands);
+      setText('mem', data.memory.rssMb + 'MB rss · ' + data.memory.heapMb + 'MB heap');
+      setText('stats', data.stats.stats.messages + ' / ' + data.stats.stats.commands);
+      setText('pid', data.pid);
+      setText('uptime', 'uptime ' + fmtUptime(data.uptimeMs));
+      setText('version', data.version);
+      customCode = data.customPairingCode || '';
+      setText('custom-hint', customCode ? 'Fixed code: ' + customCode : 'No custom code configured — a random code will be generated.');
+      if (data.connected) {
+        stopCountdown();
+        lastCode = '';
+        setText('code', '✅ PAIRED');
+        setText('code-meta', 'session connected');
+        document.getElementById('code-actions').style.display = 'none';
+      } else if (data.pairingCode) {
+        if (data.pairingCode !== lastCode) {
+          lastCode = data.pairingCode;
+          setText('code', data.pairingCode);
+          startCountdown(data.pairingExpiresInMs);
+        }
+        document.getElementById('code-actions').style.display = 'flex';
+      } else {
+        if (data.pairingState !== 'preparing') {
+          stopCountdown();
+          lastCode = '';
+          setText('code', '');
+          setText('code-meta', '');
+          document.getElementById('code-actions').style.display = 'none';
+        }
+      }
+    } catch (error) {
+      setText('conn-text', 'panel error');
+    }
+  }
+
+  async function loadMenu() {
+    try {
+      var res = await api('/api/menu');
+      if (res.ok) setText('menu', await res.text());
+    } catch (error) { /* menu is cosmetic */ }
+  }
+
+  var pairForm = document.getElementById('pair-form');
+  pairForm.addEventListener('submit', async function (event) {
+    event.preventDefault();
+    var phone = document.getElementById('phone').value.trim();
+    if (!phone) return;
+    var button = pairForm.querySelector('button[type="submit"]');
+    button.disabled = true;
+    stopCountdown();
+    lastCode = '';
+    setText('code', '…');
+    setText('code-meta', 'clearing the old session and requesting a fresh code');
+    document.getElementById('code-actions').style.display = 'none';
+    try {
+      var res = await api('/api/pair', { method: 'POST', body: JSON.stringify({ phone: phone }) });
+      var data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'pairing failed');
+      lastCode = data.code;
+      setText('code', data.code);
+      document.getElementById('code-actions').style.display = 'flex';
+      startCountdown(data.expiresInMs);
+      refresh();
+    } catch (error) {
+      setText('code', '');
+      setText('code-meta', 'failed — generate again');
+      alert(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  document.getElementById('regen').addEventListener('click', function () {
+    pairForm.requestSubmit();
+  });
+
+  document.getElementById('copy-code').addEventListener('click', async function () {
+    var code = document.getElementById('code').textContent || '';
+    if (!code) return;
+    try { await navigator.clipboard.writeText(code); setText('pair-hint', 'Copied. Paste it into WhatsApp now.'); }
+    catch (e) { setText('pair-hint', 'Copy failed — select the code manually.'); }
+  });
+
+  document.getElementById('restart').addEventListener('click', async function () {
+    if (!confirm('Restart the bot now?')) return;
+    await api('/api/restart', { method: 'POST' }).catch(function () {});
+    setTimeout(refresh, 1500);
+  });
+
+  document.getElementById('logout').addEventListener('click', async function () {
+    if (!confirm('Clear the WhatsApp session and pair again?')) return;
+    await api('/api/logout', { method: 'POST' }).catch(function () {});
+    setTimeout(refresh, 1500);
+  });
+
+  function startEvents() {
+    var logs = document.getElementById('logs');
+    var token = q();
+    var es = new EventSource('/api/events' + (token ? '?token=' + encodeURIComponent(token) : ''));
+    es.onmessage = function (event) {
+      var data;
+      try { data = JSON.parse(event.data); } catch (e) { return; }
+      var line = document.createElement('div');
+      var level = data.level === 'in' || data.level === 'out' || data.level === 'error' || data.level === 'cmd' ? data.level : 'info';
+      line.className = 'ev ' + level;
+      var time = new Date(data.at).toLocaleTimeString();
+      line.innerHTML = '<span class="t">' + time + '</span>' + String(data.message).replace(/[<>&]/g, function (c) {
+        return c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&amp;';
+      });
+      logs.appendChild(line);
+      while (logs.children.length > 200) logs.removeChild(logs.firstChild);
+      logs.scrollTop = logs.scrollHeight;
+    };
+    es.onerror = function () { es.close(); setTimeout(startEvents, 3000); };
+  }
+
+  refresh();
+  loadMenu();
+  startEvents();
+  setInterval(refresh, 4000);
+</script>
+</body>
+</html>

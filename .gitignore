@@ -1,0 +1,14 @@
+node_modules/
+.env
+.dev.vars
+.github-token
+.wrangler/
+tools/keys/
+*.pem
+# legacy runtime folders; state now lives in %LOCALAPPDATA%\CortanaMini
+auth/
+data/
+logs/
+*.log
+.DS_Store
+npm-debug.log*

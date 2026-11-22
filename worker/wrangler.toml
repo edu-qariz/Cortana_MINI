@@ -1,0 +1,22 @@
+# Cloudflare Worker configuration.
+# The D1 / KV ids are filled in by the setup script (see docs/worker-deploy.md).
+name = "cortana-mini-api"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+[vars]
+CHANNEL = "stable"
+# Licence token lifetime. The client refreshes when less than 2 minutes are left.
+TOKEN_TTL_SECONDS = "3600"
+# KV key holding the signed release manifest.
+MANIFEST_KEY = "release:manifest:stable"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cortana-mini"
+database_id = "REPLACE_WITH_D1_ID"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "REPLACE_WITH_KV_ID"

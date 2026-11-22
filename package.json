@@ -1,0 +1,30 @@
+{
+  "name": "cortana-mini",
+  "version": "2.3.0",
+  "private": true,
+  "description": "CORTANA MINI V2.3 - lightweight WhatsApp bot with compact menu, usage replies and silent media actions",
+  "main": "start.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "node --max-old-space-size=512 start.js",
+    "dev": "node --max-old-space-size=512 start.js",
+    "check": "node --check start.js",
+    "test": "node --test",
+    "update:apply": "node tools/apply-update.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@distube/ytdl-core": "^4.16.12",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "axios": "^1.14.0",
+    "cheerio": "^1.1.2",
+    "express": "^4.21.2",
+    "ffmpeg-static": "^5.2.0",
+    "form-data": "^4.0.5",
+    "pino": "^10.1.0",
+    "youtube-dl-exec": "^3.1.19",
+    "yt-search": "^2.13.1"
+  }
+}

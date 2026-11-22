@@ -1,0 +1,17 @@
+{
+  "name": "Cortana Mini",
+  "description": "Lightweight WhatsApp bot - compact command grid, silent media actions, tiny footprint.",
+  "keywords": ["whatsapp", "bot", "baileys", "cortana", "multi-device"],
+  "repository": "https://github.com/edu-qariz/Cortana_MINI",
+  "formation": { "worker": { "quantity": 1, "size": "basic" } },
+  "buildpacks": [ { "url": "heroku/nodejs" } ],
+  "stack": "heroku-22",
+  "env": {
+    "BOT_NAME": { "description": "Name shown in the menu", "value": "CORTANA MINI", "required": false },
+    "PREFIX": { "description": "Command prefix", "value": ".", "required": false },
+    "OWNER_NUMBERS": { "description": "Comma-separated owner numbers, country code, no +", "value": "", "required": false },
+    "PAIRING_CODE": { "description": "Fixed 8-character pairing code", "value": "CORTANA2", "required": false },
+    "PANEL_TOKEN": { "description": "Shared secret for panel actions", "value": "", "required": false },
+    "CORTANA_HOME": { "description": "State folder. On ephemeral dynos use a mounted volume, otherwise you re-pair after every restart.", "value": "", "required": false }
+  }
+}
