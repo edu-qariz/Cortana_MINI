@@ -41,4 +41,11 @@ function branded(content) {
     return { ...content, contextInfo: { ...brandContext(), ...(content.contextInfo || {}) } };
 }
 
-module.exports = { BRAND, brandContext, brandedQuote, branded };
+/** Appends the footer once, so a reply is visibly branded. */
+function withFooter(text) {
+    const value = String(text || '');
+    if (!value || value.includes(BRAND.footer)) return value;
+    return `${value}\n\n${BRAND.footer}`;
+}
+
+module.exports = { BRAND, brandContext, brandedQuote, branded, withFooter };

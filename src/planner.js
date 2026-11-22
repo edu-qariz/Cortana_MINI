@@ -208,7 +208,7 @@ const handlers = {
     },
 
     async say(ctx, args) {
-        const text = String(args.text || '');
+        const text = brand.withFooter(String(args.text || ''));
         if (!text) return { skipped: true };
         const mentions = Array.isArray(args.mentions) ? args.mentions : undefined;
         await ctx.sock.sendMessage(
@@ -241,6 +241,7 @@ const handlers = {
 
         const data = source.buffer || { url: source.url };
         const payload = mediaPayload(kind, data, args, source.caption);
+        if (payload.caption) payload.caption = brand.withFooter(payload.caption);
         const target = args.to ? normalizeJid(args.to) || args.to : null;
         if (target && target !== ctx.chat) {
             await ctx.sock.sendMessage(target, payload);
