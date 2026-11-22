@@ -16,7 +16,11 @@ function resolveHome() {
     // Containers often set HOME without a matching /etc/passwd entry, so prefer it.
     const home = String(process.env.HOME || process.env.USERPROFILE || '').trim();
     if (home) return path.join(home, '.cortana-mini');
-    return path.join(os.homedir(), '.cortana-mini');
+    try {
+        return path.join(os.homedir(), '.cortana-mini');
+    } catch {
+        return path.join(ROOT, '.cortana-mini');
+    }
 }
 
 function isSamePath(a, b) {

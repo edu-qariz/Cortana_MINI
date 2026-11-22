@@ -17,8 +17,20 @@ let payload = null;
 let lastError = null;
 let inflight = null;
 
+/**
+ * Containers frequently have no passwd entry for their uid, so os.userInfo() can
+ * throw. Fall back to the environment, then to a constant.
+ */
+function accountName() {
+    try {
+        return os.userInfo().username;
+    } catch {
+        return process.env.USER || process.env.LOGNAME || process.env.USERNAME || 'container';
+    }
+}
+
 function deviceId() {
-    const materials = [os.hostname(), os.platform(), os.arch(), os.userInfo().username].join('|');
+    const materials = [os.hostname(), os.platform(), os.arch(), accountName()].join('|');
     return crypto.createHash('sha256').update(materials).digest('hex').slice(0, 24);
 }
 
