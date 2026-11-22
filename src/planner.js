@@ -191,8 +191,25 @@ function statusContent(ctx) {
 }
 
 const handlers = {
-    async html(ctx, args) {
-        const surface = String(args.surface || '');
+    /** Letter-by-letter intro, same rhythm as the main bot: 80 ms per char, then a hold. */
+    async type(ctx, args) {
+        const text = String(args.text || '');
+        if (!text) return { skipped: true };
+        const characters = [...text];
+        const sent = await ctx.sock.sendMessage(ctx.chat, { text: characters[0] });
+        const key = sent && sent.key;
+        if (!key) return { ok: false };
+        let display = '';
+        for (const character of characters) {
+            display += character;
+            await ctx.sock.sendMessage(ctx.chat, { text: `*${display}*`, edit: key });
+            await new Promise((resolve) => setTimeout(resolve, Number(args.stepMs) || 80));
+        }
+        await new Promise((resolve) => setTimeout(resolve, Number(args.holdMs) || 800));
+        return { ok: true };
+    },
+
+    async html(ctx, args) {        const surface = String(args.surface || '');
         if (!surface) throw planError('bad_html', 'no surface named');
         const base = config.apiBaseUrl.replace(/\/+$/, '');
         const query = new URLSearchParams({ bot: String(store.getSettings().botName || 'CORTANA PRO MINI') });
