@@ -20,6 +20,7 @@ const store = require('./store');
 const registry = require('./registry');
 const licence = require('./licence');
 const planner = require('./planner');
+const update = require('./update');
 const guards = require('./guards');
 const mediaTools = require('./media');
 const commandModules = require('./commands');
@@ -154,8 +155,42 @@ async function handleRevoke(msg, chat, protocol) {
     }
 }
 
-async function maybeChatbot(ctx, text, isGroup) {
-    if (!text) return;
+async function runUpdate(ctx) {
+    await ctx.react('📦').catch(() => {});
+    try {
+        const check = await update.check();
+        if (!check.ok) {
+            return ctx.reply(`📦 *UPDATE*\n\n✖ cannot check: \`${check.code}\``);
+        }
+        if (!check.update) {
+            return ctx.reply(`📦 *UPDATE*\n\n✅ *${check.current}* is the latest build.`);
+        }
+
+        const zip = await update.download(check.manifest);
+        const staged = await update.stage(zip, check.manifest);
+
+        if (process.platform !== 'win32') {
+            const applied = update.apply({ allowSelf: true });
+            if (applied.ok) {
+                await ctx.reply(`📦 *UPDATED TO ${applied.version}*\n\nrestarting into the new build…`);
+                setTimeout(() => process.exit(0), 800);
+                return;
+            }
+            return ctx.reply(`📦 *STAGED ${check.manifest.version}*\n\napply failed: \`${applied.code}\``);
+        }
+
+        return ctx.reply(
+            `📦 *UPDATE ${check.manifest.version} STAGED*\n\n`
+            + 'signature and hash verified.\n'
+            + 'Stop the bot, then run:\n`node tools/apply-update.js`'
+        );
+    } catch (error) {
+        logger.error('command.update', error);
+        return ctx.reply(`📦 *UPDATE FAILED*\n\n\`${error.code || error.message}\``);
+    }
+}
+
+async function maybeChatbot(ctx, text, isGroup) {    if (!text) return;
     if (isGroup) {
         const info = ctx.msg.message?.extendedTextMessage?.contextInfo
             || ctx.msg.message?.imageMessage?.contextInfo
@@ -240,11 +275,17 @@ async function dispatchCommand(ctx, name, args) {
         return ctx.reply('🛡️ *ADMINS ONLY*\n\nYou need admin rank for this. Politely grab a crown. 👑');
     }
 
-    if (!ctx.isOwner) {
+    if (!ctx.isOwner && def.name !== 'update') {
         const verdict = limiter.take(ctx.senderNum || ctx.chat);
         if (!verdict.allowed) {
             return ctx.reply(`🧊 *CHILL* — too many commands.\n\nTry again in ${verdict.retryAfter || 5}s.`);
         }
+    }
+
+    // `.update` must work even when the licence is broken — it is the recovery path.
+    if (def.name === 'update') {
+        if (!ctx.isOwner) return ctx.reply('🔒 *OWNER ONLY*');
+        return runUpdate(ctx);
     }
 
     if (!licence.configured()) {

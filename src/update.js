@@ -237,6 +237,51 @@ function pending() {
     }
 }
 
+function isUsable(dir) {
+    try {
+        return REQUIRED.every((name) => fs.existsSync(path.join(dir, name)));
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * If a previous swap left the app folder incomplete, put the last good build back.
+ * Runs before anything else touches the filesystem.
+ */
+function repair() {
+    const app = config.paths.root;
+    if (isUsable(app)) return null;
+
+    const parent = path.dirname(app);
+    const base = path.basename(app);
+    let candidates = [];
+    try {
+        candidates = fs.readdirSync(parent)
+            .filter((name) => name.startsWith(`${base}.old-`))
+            .sort()
+            .reverse();
+    } catch {
+        return null;
+    }
+
+    for (const name of candidates) {
+        const dir = path.join(parent, name);
+        if (!isUsable(dir)) continue;
+        const broken = `${app}.broken-${Date.now()}`;
+        try {
+            if (fs.existsSync(app)) fs.renameSync(app, broken);
+            fs.renameSync(dir, app);
+            logger.warn(`restored ${name} — the previous update left the app folder incomplete`);
+            return { ok: true, restored: name, broken };
+        } catch (error) {
+            logger.error('update.repair', error);
+            return null;
+        }
+    }
+    return null;
+}
+
 function lockIsAlive() {
     try {
         const pid = Number(String(fs.readFileSync(path.join(config.paths.data, 'instance.lock'), 'utf8')).trim());
@@ -333,6 +378,7 @@ module.exports = {
     stage,
     apply,
     autoApply,
+    repair,
     pending,
     PENDING_FILE,
 };

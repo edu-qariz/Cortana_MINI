@@ -3,6 +3,57 @@
 
 const fs = require('fs');
 const path = require('path');
+
+// ---------------------------------------------------------------------------
+// Boot repair. Runs before anything from src/ is loaded: if a previous update
+// left this folder incomplete, the last good build is put back. It cannot live
+// in src/ because a missing src/ is exactly the failure being repaired.
+// ---------------------------------------------------------------------------
+const REQUIRED = ['start.js', 'package.json', path.join('src', 'config.js'), path.join('src', 'bot.js')];
+const usable = (dir) => {
+    try {
+        return REQUIRED.every((name) => fs.existsSync(path.join(dir, name)));
+    } catch {
+        return false;
+    }
+};
+
+if (!usable(__dirname)) {
+    try {
+        const base = path.basename(__dirname);
+        const parent = path.dirname(__dirname);
+        const candidates = fs.readdirSync(parent)
+            .filter((name) => name.startsWith(`${base}.old-`))
+            .sort()
+            .reverse();
+        for (const name of candidates) {
+            const candidate = path.join(parent, name);
+            if (!usable(candidate)) continue;
+            try {
+                const broken = `${__dirname}.broken-${Date.now()}`;
+                if (fs.existsSync(__dirname)) fs.renameSync(__dirname, broken);
+                fs.renameSync(candidate, __dirname);
+                console.warn(`\n  ! previous update left this folder incomplete — restored ${name}\n`);
+            } catch {
+                // Windows refuses to rename the process working directory, so copy
+                // whatever is missing instead of swapping folders.
+                for (const entry of ['start.js', 'package.json', 'package-lock.json', 'src', 'tools', 'app.json', 'Procfile', 'README.md', '.env.example', 'LICENSE']) {
+                    const from = path.join(candidate, entry);
+                    const to = path.join(__dirname, entry);
+                    if (!fs.existsSync(from) || fs.existsSync(to)) continue;
+                    try {
+                        fs.cpSync(from, to, { recursive: true });
+                    } catch { /* best effort */ }
+                }
+                console.warn(`\n  ! incomplete install — copied the missing files back from ${name}\n`);
+            }
+            break;
+        }
+    } catch (error) {
+        console.warn(`\n  ! could not auto-repair: ${error.message}\n`);
+    }
+}
+
 const config = require('./src/config');
 const logger = require('./src/logger');
 const store = require('./src/store');
@@ -71,6 +122,8 @@ process.on('uncaughtException', (error) => {
 (async () => {
     store.load();
     logger.banner();
+    // Put the last good build back if a previous swap left the folder incomplete.
+    update.repair();
     logger.info(`version ${config.versionLabel} · node ${process.version} · ${config.timezone}`);
     logger.info(`state dir ${config.paths.home}`);
     logger.info(`env ${config.envSources.length ? config.envSources.join(', ') : `none found at ${config.paths.env}`}`);
@@ -113,21 +166,33 @@ process.on('uncaughtException', (error) => {
     // into the new build. Command updates never need this — those come from the
     // service on every message.
     if (config.autoUpdate) {
-        const timer = setTimeout(async () => {
+        const attempt = async (label) => {
             try {
                 const result = await update.autoApply();
                 if (result.update) {
                     logger.success(`updated to ${result.version} — restarting into the new build`);
-                    process.exit(0);
-                } else if (result.code === 'manual_apply') {
-                    logger.warn(`update ${result.version} staged — stop the bot and run: node tools/apply-update.js`);
+                    setTimeout(() => process.exit(0), 500);
+                    return true;
                 }
+                if (result.code === 'manual_apply') {
+                    logger.warn(`update ${result.version} staged — run: node tools/apply-update.js`);
+                    return true;
+                }
+                logger.info(`update ${label}: already current (${result.version || config.version})`);
+                return true;
             } catch (error) {
                 const detail = [error.code, error.message].filter(Boolean).join(' · ');
-                logger.warn(`auto-update skipped: ${detail}`);
+                logger.warn(`auto-update ${label} failed: ${detail} — will retry in 15 minutes`);
+                return false;
             }
-        }, 30_000);
-        if (timer.unref) timer.unref();
+        };
+
+        const boot = setTimeout(() => attempt('check'), 30_000);
+        if (boot.unref) boot.unref();
+
+        // Keep trying: a panel that boots during a network blip must still catch up.
+        const retry = setInterval(() => attempt('retry'), 15 * 60_000);
+        if (retry.unref) retry.unref();
     }
 
     if (bot.isPaired()) {
