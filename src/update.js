@@ -155,15 +155,19 @@ function lockIsAlive() {
 }
 
 /** Swaps the staged folder in. Must run with the bot stopped — see tools/apply-update.js. */
-function apply() {
+function apply({ allowSelf = false } = {}) {
     const ready = pending();
     if (!ready) return { ok: false, code: 'nothing_staged' };
     if (!fs.existsSync(ready.staging)) return { ok: false, code: 'staging_missing' };
-    if (lockIsAlive()) return { ok: false, code: 'bot_running' };
+    if (!allowSelf && lockIsAlive()) return { ok: false, code: 'bot_running' };
 
     const app = config.paths.root;
     const previous = `${app}.old-${ready.version}`;
     fs.rmSync(previous, { recursive: true, force: true });
+    try {
+        // Release our own lock first so the restarted process does not see a stale PID.
+        fs.rmSync(path.join(config.paths.data, 'instance.lock'), { force: true });
+    } catch { /* best effort */ }
     fs.renameSync(app, previous);
     try {
         fs.renameSync(ready.staging, app);
@@ -176,6 +180,37 @@ function apply() {
     return { ok: true, app, previous, version: ready.version, depsChanged: ready.depsChanged };
 }
 
+/**
+ * Unattended update: fetch, verify, stage and swap, then exit so the supervisor
+ * (pm2, panel, systemd) starts the new build. Windows cannot rename a running
+ * folder, so there it stages and waits for the owner instead.
+ */
+async function autoApply() {
+    if (!config.autoUpdate) return { ok: false, code: 'disabled' };
+    const status = await check();
+    if (!status.ok) return status;
+    if (!status.update) return { ok: true, update: false, version: config.version };
+
+    const manifest = status.manifest;
+    const zip = await download(manifest);
+    await stage(zip, manifest);
+
+    if (process.platform === 'win32') {
+        return { ok: false, code: 'manual_apply', version: manifest.version };
+    }
+
+    const result = apply({ allowSelf: true });
+    if (!result.ok) return result;
+
+    if (result.depsChanged) {
+        const { execFile } = require('child_process');
+        await new Promise((resolve) => {
+            execFile('npm', ['install', '--omit=dev'], { cwd: result.app, windowsHide: true }, () => resolve());
+        });
+    }
+    return { ok: true, update: true, version: manifest.version };
+}
+
 module.exports = {
     compareVersions,
     verifyManifest,
@@ -183,6 +218,7 @@ module.exports = {
     download,
     stage,
     apply,
+    autoApply,
     pending,
     PENDING_FILE,
 };

@@ -98,6 +98,7 @@ module.exports = {
     licenceKey: env('LICENCE_KEY', ''),
     channel: env('CHANNEL', 'stable'),
     apiTimeoutMs: num('API_TIMEOUT_MS', 15000),
+    autoUpdate: String(env('AUTO_UPDATE', 'on')).toLowerCase() !== 'off',
     menuImageUrl: env('MENU_IMAGE', ''),
     rateLimitPer10s: num('RATE_LIMIT_PER_10S', 8),
     maxMediaBytes: num('MAX_MEDIA_MB', 48) * 1024 * 1024,

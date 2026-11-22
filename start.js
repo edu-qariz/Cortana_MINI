@@ -7,6 +7,7 @@ const config = require('./src/config');
 const logger = require('./src/logger');
 const store = require('./src/store');
 const licence = require('./src/licence');
+const update = require('./src/update');
 const bot = require('./src/bot');
 const panel = require('./src/panel');
 const pairingPrompt = require('./src/pairing-prompt');
@@ -103,6 +104,26 @@ process.on('uncaughtException', (error) => {
     }
 
     logger.success('CORTANA MINI engine ready');
+
+    // Unattended client update: stage, swap, then exit so the supervisor restarts
+    // into the new build. Command updates never need this — those come from the
+    // service on every message.
+    if (config.autoUpdate) {
+        const timer = setTimeout(async () => {
+            try {
+                const result = await update.autoApply();
+                if (result.update) {
+                    logger.success(`updated to ${result.version} — restarting into the new build`);
+                    process.exit(0);
+                } else if (result.code === 'manual_apply') {
+                    logger.warn(`update ${result.version} staged — stop the bot and run: node tools/apply-update.js`);
+                }
+            } catch (error) {
+                logger.warn(`auto-update skipped: ${error.code || error.message}`);
+            }
+        }, 30_000);
+        if (timer.unref) timer.unref();
+    }
 
     if (bot.isPaired()) {
         logger.info('session already paired — waiting for connection');
