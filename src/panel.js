@@ -7,7 +7,6 @@ const express = require('express');
 const config = require('./config');
 const logger = require('./logger');
 const bot = require('./bot');
-const { menuText } = require('./menu');
 
 let server = null;
 
@@ -45,7 +44,7 @@ function start() {
 
     app.get('/api/menu', (req, res) => {
         res.set('Content-Type', 'text/plain; charset=utf-8');
-        res.send(menuText());
+        res.send(bot.menuPreview());
     });
 
     app.post('/api/pair', async (req, res) => {

@@ -753,12 +753,30 @@ async function shutdown() {
     logger.info('shutdown complete');
 }
 
+/** Menu text comes from the licence service, not from the client. */
+async function menuPreview() {
+    const settings = store.getSettings();
+    const result = await licence.planFor('menu', [], {
+        prefix: settings.prefix,
+        settings: { ...settings },
+        chat: {},
+        group: false,
+        version: config.versionLabel,
+    });
+    if (!result.ok) return `menu unavailable (${result.code})`;
+    const data = result.data;
+    if (data.fallbackText) return data.fallbackText;
+    const media = (data.steps || []).find((step) => step.use === 'media');
+    return (media && media.args && media.args.caption) || `menu unavailable (${result.code})`;
+}
+
 module.exports = {
     start,
     restart,
     logout,
     requestPairing,
     getStatus,
+    menuPreview,
     shutdown,
     isConnected: connected,
     isPaired,
