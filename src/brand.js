@@ -1,50 +1,20 @@
 'use strict';
 
-// Brand identity shared by every outgoing message. The newsletter context is what
-// makes replies look like they come from a verified channel.
+// Brand identity. Only the text footer carries the brand: attaching a newsletter
+// context made every reply wear a "View channel" chip, which the owner calls noise.
 const BRAND = {
-    newsletterJid: '120363424485406730@newsletter',
-    newsletterName: 'CORTANA PRO MINI',
-    serverMessageId: 143,
     signature: '✦ 𝐂𝐎𝐑𝐓𝐀𝐍𝐀 𝐏𝐑𝐎 𝐌𝐈𝐍𝐈 ✦',
     footer: '©2026 t.me/techdepro',
 };
 
 const FOOTER_BLOCK = `${BRAND.signature}\nèdûqarîz · ${BRAND.footer}`;
 
-function brandContext(extra = {}) {
-    return {
-        isForwarded: true,
-        forwardingScore: 999,
-        forwardedNewsletterMessageInfo: { ...BRAND },
-        ...extra,
-    };
-}
-
-function brandedQuote() {
-    return {
-        key: {
-            fromMe: false,
-            participant: '0@s.whatsapp.net',
-            remoteJid: 'status@broadcast',
-        },
-        message: {
-            newsletterAdminInviteMessage: {
-                newsletterJid: BRAND.newsletterJid,
-                newsletterName: BRAND.newsletterName,
-                jpegThumbnail: Buffer.alloc(0),
-                caption: BRAND.footer,
-                inviteExpiration: 0,
-            },
-        },
-    };
-}
-
+/** Replies ship untouched — no forwarding, no channel card, no badge. */
 function branded(content) {
-    return { ...content, contextInfo: { ...brandContext(), ...(content.contextInfo || {}) } };
+    return content;
 }
 
-/** A plain fake quote with no channel attached, for prank/terminal sequences. */
+/** Plain quote bubble so the reply still reads as a reply, with nothing attached. */
 function fakeQuote(text = '') {
     return {
         key: {
@@ -56,6 +26,11 @@ function fakeQuote(text = '') {
     };
 }
 
+/** Kept so older call sites keep working; it is the same plain bubble now. */
+function brandedQuote() {
+    return fakeQuote();
+}
+
 /** Appends the brand block once, so every reply is visibly branded. */
 function withFooter(text) {
     const value = String(text || '');
@@ -63,4 +38,4 @@ function withFooter(text) {
     return `${value}\n\n${FOOTER_BLOCK}`;
 }
 
-module.exports = { BRAND, brandContext, brandedQuote, fakeQuote, branded, withFooter };
+module.exports = { BRAND, fakeQuote, brandedQuote, branded, withFooter };

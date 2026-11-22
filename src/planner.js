@@ -508,13 +508,20 @@ const handlers = {
 
         const body = String(args.text || '');
         const footer = String(args.footer || '');
+        const headerTitle = String(args.headerTitle || '').slice(0, 60);
         const buttonTitle = String(args.buttonTitle || 'SELECT').slice(0, 24);
         const sectionTitle = String(args.sectionTitle || 'OPTIONS').slice(0, 24);
+        const Interactive = proto.Message.InteractiveMessage;
 
-        const interactive = proto.Message.InteractiveMessage.fromObject({
-            body: proto.Message.InteractiveMessage.Body.fromObject({ text: body }),
-            footer: proto.Message.InteractiveMessage.Footer.fromObject({ text: footer }),
-            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.fromObject({
+        const interactive = Interactive.create({
+            body: Interactive.Body.create({ text: body }),
+            footer: Interactive.Footer.create({ text: footer }),
+            header: Interactive.Header.create({
+                title: headerTitle,
+                subtitle: '',
+                hasMediaAttachment: false,
+            }),
+            nativeFlowMessage: Interactive.NativeFlowMessage.create({
                 buttons: [
                     {
                         name: 'single_select',
@@ -529,12 +536,28 @@ const handlers = {
 
         const built = generateWAMessageFromContent(
             ctx.chat,
-            { viewOnceMessage: { message: { interactiveMessage: interactive } } },
+            {
+                viewOnceMessage: {
+                    message: {
+                        messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
+                        interactiveMessage: interactive,
+                    },
+                },
+            },
             { userJid: ctx.sock.user?.id }
         );
-        await ctx.sock.relayMessage(ctx.chat, built.message, { messageId: built.key.id });
-        logger.outgoing({ chat: ctx.chat, kind: 'select', preview: buttonTitle, ms: 0 });
-        return { ok: true, rows: rows.length };
+
+        try {
+            await ctx.sock.relayMessage(ctx.chat, built.message, { messageId: built.key.id });
+            logger.outgoing({ chat: ctx.chat, kind: 'select', preview: buttonTitle, ms: 0 });
+            return { ok: true, rows: rows.length };
+        } catch (error) {
+            // Never leave the chat with a dead picker: print the same list as text.
+            logger.warn(`select relay failed: ${error.message} — falling back to text`);
+            const list = rows.map((row) => `${row.id}${row.description ? ` — ${row.description}` : ''}`).join('\n');
+            await ctx.reply(body ? `${body}\n\n${list}` : list);
+            return { ok: true, rows: rows.length, fallback: 'text' };
+        }
     },
 
     async media(ctx, args, vars) {
