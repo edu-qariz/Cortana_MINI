@@ -103,6 +103,47 @@ async function extract(zip, target) {
     await run('powershell', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${target}' -Force`]);
 }
 
+const REQUIRED = ['start.js', 'package.json', path.join('src', 'config.js'), path.join('src', 'bot.js')];
+
+function verifyTree(dir) {
+    for (const name of REQUIRED) {
+        if (!fs.existsSync(path.join(dir, name))) {
+            throw Object.assign(new Error(`incomplete release: ${name} is missing`), { code: 'incomplete_release' });
+        }
+    }
+}
+
+async function extract(zip, target) {
+    const attempts = [];
+    if (process.platform === 'win32') {
+        attempts.push(['powershell', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${target}' -Force`]]);
+        attempts.push(['tar', ['-xf', zip, '-C', target]]);
+    } else {
+        attempts.push(['unzip', ['-q', '-o', zip, '-d', target]]);
+        attempts.push(['tar', ['-xf', zip, '-C', target]]);
+        attempts.push(['busybox', ['unzip', '-o', zip, '-d', target]]);
+    }
+
+    let lastError = null;
+    for (const [command, args] of attempts) {
+        try {
+            await run(command, args);
+            verifyTree(target);
+            return;
+        } catch (error) {
+            if (error.code === 'incomplete_release') {
+                // Extracted, but not a usable app: clear it and try the next tool.
+                fs.rmSync(target, { recursive: true, force: true });
+                fs.mkdirSync(target, { recursive: true });
+                lastError = error;
+                continue;
+            }
+            lastError = error;
+        }
+    }
+    throw Object.assign(new Error(`could not unpack the release: ${lastError && lastError.message}`), { code: 'extract_failed' });
+}
+
 async function stage(zip, manifest) {
     const staging = `${config.paths.root}.update-staging`;
     fs.rmSync(staging, { recursive: true, force: true });
@@ -113,12 +154,15 @@ async function stage(zip, manifest) {
         fs.rmSync(path.join(staging, name), { recursive: true, force: true });
     }
 
+    // Nothing is allowed to touch the live folder unless the new one proves it boots.
+    verifyTree(staging);
     await run(process.execPath, ['--check', 'start.js'], { cwd: staging });
     await run(process.execPath, ['-e', 'require("./src/config")'], {
         cwd: staging,
         env: { ...process.env, CORTANA_HOME: path.join(staging, '.smoke') },
     });
     fs.rmSync(path.join(staging, '.smoke'), { recursive: true, force: true });
+    verifyTree(staging);
 
     fs.mkdirSync(UPDATE_DIR, { recursive: true });
     fs.writeFileSync(
@@ -161,6 +205,13 @@ function apply({ allowSelf = false } = {}) {
     if (!fs.existsSync(ready.staging)) return { ok: false, code: 'staging_missing' };
     if (!allowSelf && lockIsAlive()) return { ok: false, code: 'bot_running' };
 
+    try {
+        verifyTree(ready.staging);
+    } catch (error) {
+        fs.rmSync(PENDING_FILE, { force: true });
+        return { ok: false, code: 'incomplete_release', error: error.message };
+    }
+
     const app = config.paths.root;
     const previous = `${app}.old-${ready.version}`;
     fs.rmSync(previous, { recursive: true, force: true });
@@ -175,6 +226,19 @@ function apply({ allowSelf = false } = {}) {
         fs.renameSync(previous, app);
         throw error;
     }
+
+    // Dependencies did not change, so move them across instead of forcing a rebuild
+    // (native modules make a reinstall slow and fragile on panels).
+    if (!ready.depsChanged) {
+        const from = path.join(previous, 'node_modules');
+        const to = path.join(app, 'node_modules');
+        if (fs.existsSync(from) && !fs.existsSync(to)) {
+            try {
+                fs.renameSync(from, to);
+            } catch { /* the supervisor will reinstall if this fails */ }
+        }
+    }
+
     fs.rmSync(PENDING_FILE, { force: true });
     logger.success(`updated to ${ready.version} — previous build kept at ${previous}`);
     return { ok: true, app, previous, version: ready.version, depsChanged: ready.depsChanged };
