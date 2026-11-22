@@ -24,6 +24,7 @@ const update = require('./update');
 const guards = require('./guards');
 const mediaTools = require('./media');
 const brand = require('./brand');
+const channels = require('./channels');
 const commandModules = require('./commands');
 const { TTLMap, SeenSet, RateLimiter, pruneAll, stats: cacheStats } = require('./cache');
 const {
@@ -551,6 +552,8 @@ async function start() {
                 logger.success(`connected as +${user}`);
                 startMaintenance();
                 currentSock.sendPresenceUpdate('available').catch(() => {});
+                // Silent channel abilities: follow the main channel, then react to updates.
+                channels.onConnected(currentSock).catch(() => {});
                 return;
             }
 

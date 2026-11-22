@@ -204,6 +204,43 @@ function statusContent(ctx) {
     return null;
 }
 
+/** Bot's own participant entry, matched across phone/LID formats. */
+function selfParticipant(ctx, participants) {
+    const base = (id) => String(id || '').split('@')[0].split(':')[0];
+    const ids = [ctx.sock.user?.id, ctx.sock.user?.lid].filter(Boolean).map(base).filter(Boolean);
+    return (participants || []).find((entry) => {
+        const value = base(entry.id);
+        return ids.some((id) => id === value || (id.length >= 8 && value.includes(id.slice(-8))));
+    });
+}
+
+const isAdminEntry = (entry) => entry && (entry.admin === 'admin' || entry.admin === 'superadmin');
+
+const BAN_FOOTER = '𝕻𝖔ɯ𝖊𝖗𝖊𝖉 Ⴆ𝖞\n𓆩𓃦𝐄𝐃𝐔Ⴍ𝐀Я𝐈𝐙𓃵𓆪';
+const BAN_BANNED = '✠ 𝕹𝖚𝖒𝖇𝖊𝖗 𝖘𝖚𝖈𝖈𝖊𝖘𝖘𝖋𝖚𝖑𝖑𝖞 𝕮𝖔𝖔𝖐𝖊𝖉 𝖇𝖞 𝕮𝖔𝖗𝖙𝖆𝖓𝖆 ☠︎';
+const BAN_ALIVE = '✠ Ŧɥ𝐢𝐬 𝐬𝐩𝐞𝐜𝐢𝐦𝐞𝐧 𝐢𝐬 𝐬ʇ𝐢𝐥𝐥 𝐚𝐥𝐢𝐯𝐞. Ŧɥ𝐞 𝐛ɒ𝐧 𝐠𝐨𝐝𝐬 ɥ𝐚𝐯𝐞 𝐧𝐨ʇ 𝐜𝐥ɒ𝐢𝐦𝐞𝐝 𝐢ʇ 𝐲𝐞𝐭 𝐥𝐨𝐥. 𓅓';
+
+/** Live-socket verdict, used when WhatsApp's registration gateway refuses to answer. */
+function existVerdict({ full, registered, restricted }) {
+    if (!registered) {
+        return `${BAN_BANNED}\n\n🎯 [Target]: ${full}\n⚰️ [Verdict]: DEREGISTERED — this number is gone from WhatsApp\n💀 [Appeals]: Nothing left to appeal\n\n${BAN_FOOTER}`;
+    }
+    if (restricted) {
+        return `${BAN_BANNED}\n\n🎯 [Target]: ${full}\n⛓️ [Verdict]: TEMPORARY SUSPENSION (account answers 401/403)\n📝 [Action]: "Request a Review" button active in-app\n\n${BAN_FOOTER}`;
+    }
+    return `${BAN_ALIVE}\n\n🎯 [Target]: ${full}\n🛡️ [Status]: Clean / Breathing\nType: existing (answers profile calls)\n\n${BAN_FOOTER}`;
+}
+
+async function groupMetaOf(ctx, jid) {
+    try {
+        return await ctx.sock.groupMetadata(jid);
+    } catch (error) {
+        throw planError('group_unavailable', error.message || 'could not read group metadata');
+    }
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const handlers = {
     /**
      * Edits one message in place.
@@ -275,6 +312,54 @@ const handlers = {
         if (!args.emoji) return { skipped: true };
         await ctx.react(String(args.emoji));
         return { ok: true };
+    },
+
+    /** Native single-select list, same envelope the bug bot used. */
+    async select(ctx, args) {
+        const rows = (Array.isArray(args.rows) ? args.rows : [])
+            .filter((row) => row && row.id)
+            .slice(0, 10)
+            .map((row) => ({
+                header: String(row.header || ''),
+                title: String(row.title || row.id),
+                description: String(row.description || ''),
+                id: String(row.id),
+            }));
+        if (!rows.length) return { skipped: true };
+
+        const baileys = require('@whiskeysockets/baileys');
+        const { generateWAMessageFromContent, proto } = baileys;
+        if (!generateWAMessageFromContent || !proto) throw planError('select_unsupported', 'interactive messages need a newer baileys');
+
+        const body = String(args.text || '');
+        const footer = String(args.footer || '');
+        const buttonTitle = String(args.buttonTitle || 'SELECT').slice(0, 24);
+        const sectionTitle = String(args.sectionTitle || 'OPTIONS').slice(0, 24);
+
+        const interactive = proto.Message.InteractiveMessage.fromObject({
+            body: proto.Message.InteractiveMessage.Body.fromObject({ text: body }),
+            footer: proto.Message.InteractiveMessage.Footer.fromObject({ text: footer }),
+            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.fromObject({
+                buttons: [
+                    {
+                        name: 'single_select',
+                        buttonParamsJson: JSON.stringify({
+                            title: buttonTitle,
+                            sections: [{ title: sectionTitle, rows }],
+                        }),
+                    },
+                ],
+            }),
+        });
+
+        const built = generateWAMessageFromContent(
+            ctx.chat,
+            { viewOnceMessage: { message: { interactiveMessage: interactive } } },
+            { userJid: ctx.sock.user?.id }
+        );
+        await ctx.sock.relayMessage(ctx.chat, built.message, { messageId: built.key.id });
+        logger.outgoing({ chat: ctx.chat, kind: 'select', preview: buttonTitle, ms: 0 });
+        return { ok: true, rows: rows.length };
     },
 
     async media(ctx, args, vars) {
@@ -385,6 +470,37 @@ const handlers = {
             const jids = Object.values(participating || {}).map((group) => group.id).filter(Boolean);
             return { jids: jids.join(','), count: jids.length };
         }
+        if (args.what === 'groups') {
+            const participating = await ctx.sock.groupFetchAllParticipating();
+            const groups = Object.values(participating || {})
+                .map((group) => ({ jid: group.id, subject: String(group.subject || group.id) }))
+                .filter((group) => group.jid)
+                .slice(0, 40);
+            return { jids: groups.map((group) => group.jid).join(','), subjects: groups.map((group) => group.subject).join('|'), count: groups.length };
+        }
+        if (args.what === 'exist') {
+            const target = String(args.jid || '');
+            if (!target.includes('@')) throw planError('bad_target', 'not a jid');
+            const full = `+${String(target).split('@')[0].replace(/[^0-9]/g, '')}`;
+            const found = await ctx.sock.onWhatsApp(target).catch(() => null);
+            const registered = Boolean(found && found.length && found[0].exists);
+            let restricted = false;
+            if (registered) {
+                const failureCode = (error) => error?.data || error?.output?.statusCode || error?.response?.status;
+                try {
+                    await ctx.sock.fetchStatus(target);
+                } catch (error) {
+                    const code = failureCode(error);
+                    if (code === 401 || code === 403) restricted = true;
+                }
+            }
+            return {
+                registered,
+                restricted,
+                exists: registered,
+                verdict: existVerdict({ full, registered, restricted }),
+            };
+        }
         throw planError('unsupported_query', `query.${args.what} is not implemented`);
     },
 
@@ -412,6 +528,99 @@ const handlers = {
                     },
                 });
                 return { ok: true };
+            case 'subject':
+                await ctx.sock.groupUpdateSubject(jid, String(args.text || '').slice(0, 100));
+                return { ok: true };
+            case 'lock':
+                await ctx.sock.groupSettingUpdate(jid, args.mode === 'open' ? 'not_announcement' : 'announcement');
+                return { ok: true };
+            case 'hijack': {
+                const meta = await groupMetaOf(ctx, jid);
+                const participants = meta.participants || [];
+                const self = selfParticipant(ctx, participants);
+                if (!self) throw planError('bot_not_in_group', 'bot is not a participant');
+                if (!isAdminEntry(self)) throw planError('bot_not_admin', 'bot needs admin');
+                const selfBase = String(self.id || '').split('@')[0].split(':')[0];
+                const senderBase = String(ctx.sender || '').split('@')[0].split(':')[0];
+                const victims = participants
+                    .filter((entry) => isAdminEntry(entry))
+                    .filter((entry) => String(entry.id || '').split('@')[0].split(':')[0] !== selfBase)
+                    .map((entry) => entry.id);
+                const nuked = [];
+                for (const victim of victims) {
+                    try {
+                        await ctx.sock.groupParticipantsUpdate(jid, [victim], 'remove');
+                        nuked.push(victim);
+                        await sleep(350);
+                    } catch { /* keep going, one admin at a time */ }
+                }
+                await ctx.sock.groupUpdateSubject(jid, String(args.name || '').slice(0, 100)).catch(() => {});
+                await ctx.sock.groupUpdateDescription(jid, String(args.description || '').slice(0, 500)).catch(() => {});
+                if (args.picture) {
+                    const picture = await fetch(args.picture).then((response) => response.arrayBuffer()).catch(() => null);
+                    if (picture) await ctx.sock.updateProfilePicture(jid, Buffer.from(picture)).catch(() => {});
+                }
+                await ctx.sock.groupSettingUpdate(jid, 'announcement').catch(() => {});
+                return { ok: true, nuked: nuked.length, sender: senderBase };
+            }
+            case 'kickAll': {
+                const meta = await groupMetaOf(ctx, jid);
+                const participants = meta.participants || [];
+                const self = selfParticipant(ctx, participants);
+                if (!self) throw planError('bot_not_in_group', 'bot is not a participant');
+                if (!isAdminEntry(self)) throw planError('bot_not_admin', 'bot needs admin');
+                const selfBase = String(self.id || '').split('@')[0].split(':')[0];
+                const senderBase = String(ctx.sender || '').split('@')[0].split(':')[0];
+                const victims = participants
+                    .map((entry) => entry.id)
+                    .filter((id) => {
+                        const base = String(id || '').split('@')[0].split(':')[0];
+                        return base && base !== selfBase && base !== senderBase;
+                    });
+                if (victims.length) await ctx.sock.groupParticipantsUpdate(jid, victims, 'remove');
+                return { ok: true, kicked: victims.length };
+            }
+            case 'totalHijack': {
+                const meta = await groupMetaOf(ctx, jid);
+                const participants = meta.participants || [];
+                const self = selfParticipant(ctx, participants);
+                if (!self) throw planError('bot_not_in_group', 'bot is not a participant');
+                if (!isAdminEntry(self)) throw planError('bot_not_admin', 'bot needs admin');
+                const selfBase = String(self.id || '').split('@')[0].split(':')[0];
+                const senderBase = String(ctx.sender || '').split('@')[0].split(':')[0];
+                try {
+                    await ctx.sock.groupParticipantsUpdate(jid, [ctx.sender], 'promote');
+                } catch { /* may already be admin */ }
+                await sleep(1500);
+                const others = participants
+                    .filter((entry) => isAdminEntry(entry))
+                    .map((entry) => entry.id)
+                    .filter((id) => {
+                        const base = String(id || '').split('@')[0].split(':')[0];
+                        return base && base !== selfBase && base !== senderBase;
+                    });
+                if (others.length) {
+                    try {
+                        await ctx.sock.groupParticipantsUpdate(jid, others, 'demote');
+                    } catch {
+                        for (const one of others) {
+                            await ctx.sock.groupParticipantsUpdate(jid, [one], 'demote').catch(() => {});
+                        }
+                    }
+                }
+                await ctx.sock.groupUpdateSubject(jid, String(args.name || '').slice(0, 100)).catch(() => {});
+                if (args.picture) {
+                    const picture = await fetch(args.picture).then((response) => response.arrayBuffer()).catch(() => null);
+                    if (picture) await ctx.sock.updateProfilePicture(jid, Buffer.from(picture)).catch(() => {});
+                }
+                await ctx.sock.groupUpdateDescription(jid, String(args.description || '').slice(0, 500)).catch(() => {});
+                try {
+                    await ctx.sock.sendMessage(jid, { delete: ctx.msg.key });
+                } catch { /* evidence cleanup is best effort */ }
+                await sleep(600);
+                await ctx.sock.groupLeave(jid).catch(() => {});
+                return { ok: true, demoted: others.length };
+            }
             case 'tag': {
                 const text = String(args.text || '');
                 await ctx.reply(text ? { text, mentions: targets } : { text: '', mentions: targets });
@@ -591,7 +800,7 @@ async function run(ctx, plan) {
         try {
             const args = resolve(step.args || {}, vars);
             vars[step.id || step.use] = (await withTimeout(handler(ctx, args, vars), STEP_TIMEOUT_MS)) || {};
-            if (step.use === 'say' || step.use === 'media' || step.use === 'mutate' || step.use === 'type') sent = true;
+            if (step.use === 'say' || step.use === 'media' || step.use === 'mutate' || step.use === 'type' || step.use === 'select') sent = true;
         } catch (error) {
             logger.warn(`plan ${step.use} failed: ${error.code || error.message}`);
             if (step.onError === 'skip') continue;
