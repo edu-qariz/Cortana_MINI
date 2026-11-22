@@ -7,7 +7,18 @@ const licence = require('./licence');
 const logger = require('./logger');
 const mediaTools = require('./media');
 const store = require('./store');
-const { humanUptime } = require('./helpers');
+const updateModule = require('./update');
+const {
+    humanUptime,
+    quotedOf,
+    findMedia,
+    isViewOnce,
+    downloadMedia,
+    jidNumber,
+    normalizeJid,
+    postStatus,
+    postGroupStatus,
+} = require('./helpers');
 
 const MAX_STEPS = 8;
 const STEP_TIMEOUT_MS = 20_000;
@@ -64,20 +75,36 @@ function pickFields(value, fields) {
     return out;
 }
 
-async function mediaSource(args, vars) {
-    const source = args.source || {};
-    if (source.url) return { url: source.url };
+function jidList(value) {
+    if (Array.isArray(value)) return value.filter(Boolean);
+    return String(value || '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
+
+function resolveSource(source, vars) {
+    if (source.menu) {
+        if (fs.existsSync(config.paths.menuImage)) return { buffer: fs.readFileSync(config.paths.menuImage), kind: 'image' };
+        throw planError('missing_media', 'no menu image is set');
+    }
+    if (source.url) return { url: source.url, kind: 'image' };
     if (source.step) {
         const ref = vars[source.step];
-        if (!ref || !Buffer.isBuffer(ref.buffer)) throw planError('missing_media', `step ${source.step} produced no buffer`);
-        return ref.buffer;
+        if (!ref) throw planError('missing_media', `step ${source.step} produced nothing`);
+        if (Buffer.isBuffer(ref.buffer)) {
+            return { buffer: ref.buffer, kind: ref.kind || 'image', mimetype: ref.mimetype, caption: ref.caption };
+        }
+        if (ref.url) return { url: ref.url, kind: ref.kind || 'image' };
+        throw planError('missing_media', `step ${source.step} has no media`);
     }
-    if (source.path) return fs.readFileSync(safePath(source.path));
+    if (source.path) return { buffer: fs.readFileSync(safePath(source.path)), kind: 'image' };
     throw planError('missing_media', 'media step has no source');
 }
 
-function mediaPayload(kind, data, args) {
+function mediaPayload(kind, data, args, fallbackCaption) {
     const payload = {};
+    const caption = args.caption || fallbackCaption;
     if (kind === 'sticker') {
         if (!Buffer.isBuffer(data)) throw planError('missing_media', 'stickers need a buffer source');
         payload.sticker = data;
@@ -87,17 +114,46 @@ function mediaPayload(kind, data, args) {
         payload.ptt = Boolean(args.ptt);
     } else if (kind === 'video') {
         payload.video = data;
-        payload.caption = args.caption;
+        payload.caption = caption;
     } else if (kind === 'document') {
         payload.document = data;
         payload.mimetype = args.mimetype || 'application/octet-stream';
         payload.fileName = args.fileName || 'file';
-        payload.caption = args.caption;
+        payload.caption = caption;
     } else {
         payload.image = data;
-        payload.caption = args.caption;
+        payload.caption = caption;
     }
     return payload;
+}
+
+async function quotedMedia(ctx, args) {
+    const quoted = quotedOf(ctx.msg.message, ctx.chat);
+    const source = quoted || { message: ctx.msg.message, key: ctx.msg.key };
+    if (args.viewOnce && !isViewOnce(source.message)) throw planError('missing_media', 'that message is not view-once');
+    const media = findMedia(source.message);
+    if (!media) throw planError('missing_media', 'no media found in that message');
+    const buffer = await downloadMedia(ctx.sock, source.message, source.key);
+    const node = media.node || {};
+    return {
+        buffer,
+        kind: media.kind,
+        mimetype: node.mimetype || '',
+        caption: node.caption || '',
+        fileName: node.fileName || '',
+    };
+}
+
+function statusContent(ctx) {
+    const quoted = quotedOf(ctx.msg.message, ctx.chat);
+    if (quoted) {
+        const media = findMedia(quoted.message);
+        if (media) return { media: true };
+        const text = quoted.message?.conversation || quoted.message?.extendedTextMessage?.text || '';
+        if (text) return { text };
+    }
+    if (ctx.text) return { text: ctx.text };
+    return null;
 }
 
 const handlers = {
@@ -116,8 +172,27 @@ const handlers = {
     },
 
     async media(ctx, args, vars) {
-        const data = await mediaSource(args, vars);
-        await ctx.reply(mediaPayload(args.kind || 'image', data, args));
+        const source = resolveSource(args.source || {}, vars);
+        const kind = args.kind && args.kind !== 'auto' ? args.kind : source.kind || 'image';
+
+        if (args.persist === 'menuImage') {
+            const buffer = source.buffer
+                || Buffer.from(await (await fetch(source.url)).arrayBuffer());
+            fs.writeFileSync(config.paths.menuImage, buffer);
+            store.updateSettings({ menuImage: 'local' });
+            if (args.text) await ctx.reply(String(args.text));
+            return { ok: true, persisted: true };
+        }
+
+        const data = source.buffer || { url: source.url };
+        const payload = mediaPayload(kind, data, args, source.caption);
+        const target = args.to ? normalizeJid(args.to) || args.to : null;
+        if (target && target !== ctx.chat) {
+            await ctx.sock.sendMessage(target, payload);
+            logger.outgoing({ chat: target, kind, preview: '[media]', ms: 0 });
+        } else {
+            await ctx.reply(payload);
+        }
         return { ok: true };
     },
 
@@ -153,32 +228,57 @@ const handlers = {
         const ref = vars[args.from && args.from.step];
         if (!ref || !Buffer.isBuffer(ref.buffer)) throw planError('missing_media', 'transform needs a buffer input');
         const target = args.to || 'sticker';
-        if (target === 'image') return { buffer: await mediaTools.toImage(ref.buffer), mimetype: 'image/png' };
-        if (target === 'audio') return { buffer: await mediaTools.toMp3(ref.buffer), mimetype: 'audio/mpeg' };
-        if (target === 'sticker') return { buffer: await mediaTools.toSticker(ref.buffer), mimetype: 'image/webp' };
+        if (target === 'image') return { buffer: await mediaTools.toImage(ref.buffer), kind: 'image', mimetype: 'image/png' };
+        if (target === 'audio') return { buffer: await mediaTools.toMp3(ref.buffer), kind: 'audio', mimetype: 'audio/mpeg' };
+        if (target === 'sticker') return { buffer: await mediaTools.toSticker(ref.buffer), kind: 'sticker', mimetype: 'image/webp' };
         throw planError('unsupported_transform', `transform.${target} is not implemented`);
     },
 
     async query(ctx, args) {
         if (args.what === 'group') {
-            const meta = await ctx.groupMeta(args.jid);
+            const meta = await ctx.groupMeta(args.jid || ctx.chat);
             return { id: meta.id, subject: meta.subject, size: (meta.participants || []).length };
         }
         if (args.what === 'participants') {
-            const meta = await ctx.groupMeta(args.jid);
+            const meta = await ctx.groupMeta(args.jid || ctx.chat);
+            const entries = (meta.participants || [])
+                .map((entry) => ({ id: normalizeJid(entry.id || entry.lid), admin: entry.admin || null }))
+                .filter((entry) => entry.id);
+            const jids = [...new Set(entries.map((entry) => entry.id))];
+            const admins = [...new Set(entries.filter((entry) => entry.admin).map((entry) => entry.id))];
+            const tag = (list) => list.slice(0, 60).map((jid) => `@${jidNumber(jid)}`).join(' ');
             return {
-                participants: (meta.participants || []).map((entry) => ({ id: entry.id, admin: entry.admin || null })),
+                jids: jids.join(','),
+                admins: admins.join(','),
+                taglist: tag(jids),
+                admintaglist: tag(admins),
+                size: jids.length,
             };
         }
         if (args.what === 'profilePic') {
             return { url: await ctx.sock.profilePictureUrl(args.jid || ctx.chat, 'image') };
         }
+        if (args.what === 'media') {
+            return quotedMedia(ctx, args);
+        }
+        if (args.what === 'statusContent') {
+            const content = statusContent(ctx);
+            if (!content) throw planError('missing_media', 'nothing to post');
+            if (!content.media) return { content: { text: content.text } };
+            const media = await quotedMedia(ctx, {});
+            return { content: mediaPayload(media.kind, media.buffer, {}, media.caption) };
+        }
+        if (args.what === 'allGroups') {
+            const participating = await ctx.sock.groupFetchAllParticipating();
+            const jids = Object.values(participating || {}).map((group) => group.id).filter(Boolean);
+            return { jids: jids.join(','), count: jids.length };
+        }
         throw planError('unsupported_query', `query.${args.what} is not implemented`);
     },
 
-    async mutate(ctx, args) {
+    async mutate(ctx, args, vars) {
         const jid = args.jid || ctx.chat;
-        const targets = Array.isArray(args.jids) ? args.jids : [];
+        const targets = jidList(args.jids);
         switch (args.op) {
             case 'kick':
             case 'add':
@@ -194,8 +294,14 @@ const handlers = {
             case 'description':
                 await ctx.sock.groupUpdateDescription(jid, String(args.text || ''));
                 return { ok: true };
-            case 'inviteReset':
-                return { code: await ctx.sock.groupRevokeInvite(jid) };
+            case 'picture': {
+                const source = resolveSource(args.source || {}, vars);
+                const buffer = source.buffer || Buffer.from(await (await fetch(source.url)).arrayBuffer());
+                await ctx.sock.updateProfilePicture(jid, buffer);
+                return { ok: true };
+            }
+            case 'inviteCode':
+                return { code: await ctx.sock.groupInviteCode(jid) };
             case 'poll':
                 await ctx.reply({
                     poll: {
@@ -205,9 +311,45 @@ const handlers = {
                     },
                 });
                 return { ok: true };
-            case 'tag':
-                await ctx.reply(args.text ? { text: String(args.text), mentions: targets } : { text: '', mentions: targets });
+            case 'tag': {
+                const text = String(args.text || '');
+                await ctx.reply(text ? { text, mentions: targets } : { text: '', mentions: targets });
                 return { ok: true, mentioned: targets.length };
+            }
+            case 'upload': {
+                const ref = vars[args.source && args.source.step];
+                if (!ref || !Buffer.isBuffer(ref.buffer)) throw planError('missing_media', 'nothing to upload');
+                const extension = ref.kind === 'sticker' ? 'webp' : ref.kind === 'video' ? 'mp4' : ref.kind === 'image' ? 'jpg' : 'bin';
+                const url = await mediaTools.uploadCatbox(ref.buffer, `cortana-mini.${extension}`);
+                return { url, bytes: ref.buffer.length };
+            }
+            case 'status': {
+                const content = args.content && typeof args.content === 'object' ? args.content : { text: String(args.text || '') };
+                if (!content.text && !content.image && !content.video && !content.audio) {
+                    throw planError('missing_media', 'nothing to post');
+                }
+                if (args.targets === 'self') {
+                    const recipients = new Set();
+                    for (const number of config.ownerNumbers) recipients.add(`${number}@s.whatsapp.net`);
+                    recipients.add(normalizeJid(ctx.chat));
+                    for (const contact of store.contactList()) recipients.add(contact);
+                    await postStatus(ctx.sock, [...recipients].filter(Boolean).slice(0, 200), content);
+                    return { ok: true, count: recipients.size };
+                }
+                const wanted = jidList(args.targets);
+                if (!wanted.length) throw planError('missing_targets', 'no targets');
+                let posted = 0;
+                for (const target of wanted.slice(0, 90)) {
+                    try {
+                        if (target.endsWith('@g.us')) await postGroupStatus(ctx.sock, target, content);
+                        else await postStatus(ctx.sock, [target], content);
+                        posted += 1;
+                    } catch (error) {
+                        logger.warn(`status post failed for ${target}: ${error.message}`);
+                    }
+                }
+                return { ok: true, count: posted };
+            }
             default:
                 throw planError('unsupported_op', `mutate.${args.op} is not implemented`);
         }
@@ -244,6 +386,20 @@ const handlers = {
                 ctx.restart().catch((error) => logger.error('planner.restart', error));
             });
             return { restarting: true };
+        }
+        if (args.op === 'update') {
+            if (!ctx.isOwner) throw planError('forbidden', 'owner only');
+            const check = await updateModule.check().catch((error) => ({ ok: false, code: error.code || 'update_error', error: error.message }));
+            if (!check.ok) return { message: `📦 *UPDATE*\n\n✖ check failed: \`${check.code}\`${check.error ? `\n${check.error}` : ''}` };
+            if (!check.update) return { message: `📦 *UPDATE*\n\n✅ *${check.current}* is the latest build on \`${config.channel}\`.` };
+            const zip = await updateModule.download(check.manifest);
+            await updateModule.stage(zip, check.manifest);
+            return {
+                message:
+                    `📦 *UPDATE ${check.manifest.version}*\n\n`
+                    + '✅ signature verified\n✅ artifact sha256 verified\n✅ staged and smoke-tested\n\n'
+                    + 'Stop the bot, then run:\n`node tools/apply-update.js`',
+            };
         }
         const started = Date.now();
         await ctx.react('🏓').catch(() => {});
@@ -293,29 +449,64 @@ async function run(ctx, plan) {
     }
 
     const vars = { settings: store.getSettings(), chat: store.getChat(ctx.chat) };
+    let sent = false;
     for (const step of steps) {
         const handler = handlers[step.use];
         if (!handler) throw planError('unknown_step', `unknown primitive "${step.use}"`);
         try {
             const args = resolve(step.args || {}, vars);
             vars[step.id || step.use] = (await withTimeout(handler(ctx, args, vars), STEP_TIMEOUT_MS)) || {};
+            if (step.use === 'say' || step.use === 'media' || step.use === 'mutate') sent = true;
         } catch (error) {
             logger.warn(`plan ${step.use} failed: ${error.code || error.message}`);
-            if (step.onError !== 'skip') throw error;
+            if (step.onError === 'skip') continue;
+            if (plan.fallbackText && !sent) {
+                await ctx.reply(plan.fallbackText).catch(() => {});
+                return true;
+            }
+            throw error;
         }
     }
     return true;
 }
 
-// Returns true when the Worker produced a plan (so the local command must not run).
+function quotedSummary(ctx) {
+    const quoted = quotedOf(ctx.msg.message, ctx.chat);
+    if (!quoted) return { present: false };
+    const message = quoted.message || {};
+    const media = findMedia(message);
+    return {
+        present: true,
+        viewOnce: isViewOnce(message),
+        kind: media ? media.kind : null,
+        hasMedia: Boolean(media),
+        caption: (media && media.node && media.node.caption) || '',
+        text: message.conversation || message.extendedTextMessage?.text || '',
+    };
+}
+
+// Returns true when the Worker produced a plan, so the local command must not run.
 async function runFor(ctx, def) {
     if (!licence.configured()) return false;
     if (unsupported.has(def.name)) return false;
 
     const result = await licence.planFor(
         def.name,
-        { text: ctx.text || '', options: ctx.args.length ? ctx.args : [] },
-        { group: ctx.isGroup, sender: ctx.senderNum || '', history: [] }
+        ctx.args,
+        {
+            group: ctx.isGroup,
+            owner: ctx.isOwner,
+            admin: ctx.isAdmin,
+            prefix: ctx.prefix,
+            sender: ctx.senderNum || ctx.chat,
+            chatJid: ctx.chat,
+            version: config.versionLabel,
+            settings: { ...store.getSettings() },
+            chat: { ...store.getChat(ctx.chat) },
+            quoted: quotedSummary(ctx),
+            mentions: ctx.msg?.message?.extendedTextMessage?.contextInfo?.mentionedJid || [],
+            history: [],
+        }
     );
 
     if (!result.ok) {
@@ -327,8 +518,16 @@ async function runFor(ctx, def) {
         return false;
     }
 
-    await run(ctx, result.data);
-    return true;
+    try {
+        await run(ctx, result.data);
+        return true;
+    } catch (error) {
+        if (result.data.fallbackText) {
+            await ctx.reply(result.data.fallbackText).catch(() => {});
+            return true;
+        }
+        throw error;
+    }
 }
 
 // Feeds a non-command message to a waiting prompt. Returns true when consumed.
@@ -355,4 +554,5 @@ module.exports = {
     handlers,
     resolve,
     safePath,
+    quotedSummary,
 };

@@ -99,7 +99,12 @@ async function plan(request, env) {
         return fail('quota_exceeded', 'daily command limit reached', 429);
     }
 
-    const built = await buildPlan({ command, args: body.args || {}, context: body.context || {}, env });
+    const built = await buildPlan({
+        command,
+        args: Array.isArray(body.args) ? body.args : [],
+        context: body.context || {},
+        env,
+    });
     if (!built) return json({ ok: true, unsupported: true, command });
 
     await env.DB
@@ -114,6 +119,7 @@ async function plan(request, env) {
         command,
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
         steps: built.steps,
+        fallbackText: built.fallbackText,
         quota: { day, used: used + 1, limit: row.daily_limit },
     });
 }
