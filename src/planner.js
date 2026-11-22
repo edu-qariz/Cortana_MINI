@@ -6,6 +6,7 @@ const config = require('./config');
 const licence = require('./licence');
 const logger = require('./logger');
 const mediaTools = require('./media');
+const brand = require('./brand');
 const ytdlp = require('./ytdlp');
 const ytdl = require('@distube/ytdl-core');
 const { resolveAudio, resolveVideo } = require('./media-api');
@@ -135,6 +136,7 @@ function resolveSource(source, vars) {
 function mediaPayload(kind, data, args, fallbackCaption) {
     const payload = {};
     const caption = args.caption || fallbackCaption;
+    const mentions = Array.isArray(args.mentions) ? args.mentions : undefined;
     if (kind === 'sticker') {
         if (!Buffer.isBuffer(data)) throw planError('missing_media', 'stickers need a buffer source');
         payload.sticker = data;
@@ -145,6 +147,7 @@ function mediaPayload(kind, data, args, fallbackCaption) {
     } else if (kind === 'video') {
         payload.video = data;
         payload.caption = caption;
+        if (mentions) payload.mentions = mentions;
     } else if (kind === 'document') {
         payload.document = data;
         payload.mimetype = args.mimetype || 'application/octet-stream';
@@ -153,6 +156,7 @@ function mediaPayload(kind, data, args, fallbackCaption) {
     } else {
         payload.image = data;
         payload.caption = caption;
+        if (mentions) payload.mentions = mentions;
     }
     return payload;
 }
@@ -187,11 +191,32 @@ function statusContent(ctx) {
 }
 
 const handlers = {
+    async html(ctx, args) {
+        const surface = String(args.surface || '');
+        if (!surface) throw planError('bad_html', 'no surface named');
+        const base = config.apiBaseUrl.replace(/\/+$/, '');
+        const query = new URLSearchParams({ bot: String(store.getSettings().botName || 'CORTANA PRO MINI') });
+        if (Array.isArray(args.options) && args.options.length) query.set('options', args.options.join('|'));
+        const url = `${base}/v1/html/${encodeURIComponent(surface)}?${query.toString()}`;
+
+        const response = await fetch(url, { signal: AbortSignal.timeout(STEP_TIMEOUT_MS) });
+        if (!response.ok) throw planError('html_unavailable', `surface ${surface} returned ${response.status}`);
+        const document = await response.text();
+        const { sendHtmlMessage } = require('./html-ui');
+        await sendHtmlMessage(ctx.sock, ctx.chat, document);
+        return { ok: true };
+    },
+
     async say(ctx, args) {
         const text = String(args.text || '');
         if (!text) return { skipped: true };
         const mentions = Array.isArray(args.mentions) ? args.mentions : undefined;
-        await ctx.reply(mentions ? { text, mentions } : text);
+        await ctx.sock.sendMessage(
+            ctx.chat,
+            brand.branded(mentions ? { text, mentions } : { text }),
+            { quoted: brand.brandedQuote() }
+        );
+        logger.outgoing({ chat: ctx.chat, kind: 'text', preview: text, ms: 0 });
         return { ok: true };
     },
 
@@ -221,7 +246,8 @@ const handlers = {
             await ctx.sock.sendMessage(target, payload);
             logger.outgoing({ chat: target, kind, preview: '[media]', ms: 0 });
         } else {
-            await ctx.reply(payload);
+            await ctx.sock.sendMessage(ctx.chat, brand.branded(payload), { quoted: brand.brandedQuote() });
+            logger.outgoing({ chat: ctx.chat, kind, preview: '[media]', ms: 0 });
         }
         return { ok: true };
     },
@@ -423,8 +449,7 @@ const handlers = {
             store.updateChat(args.jid || ctx.chat, { [String(args.key)]: args.value });
             return { ok: true };
         }
-        if (scope === 'contact') {
-            store.addContact(String(args.value || ''));
+        if (scope === 'contact') {            store.addContact(String(args.value || ''));
             return { ok: true };
         }
         throw planError('unsupported_scope', `remember.${scope} is not implemented`);
@@ -557,6 +582,8 @@ async function runFor(ctx, def) {
             admin: ctx.isAdmin,
             prefix: ctx.prefix,
             sender: ctx.senderNum || ctx.chat,
+            senderJid: ctx.sender,
+            hour: new Date().getHours(),
             chatJid: ctx.chat,
             version: config.versionLabel,
             settings: { ...store.getSettings() },
