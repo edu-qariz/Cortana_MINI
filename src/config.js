@@ -90,9 +90,6 @@ module.exports = {
     botName: env('BOT_NAME', 'CORTANA PRO MINI'),
     prefix: (env('PREFIX', '.') || '.').slice(0, 2),
     pairingCode: String(env('PAIRING_CODE', 'CORTANA2')).replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8),
-    htmlUiVariant: ['forwarded', 'clean', 'bare'].includes(String(env('HTML_UI_VARIANT', 'forwarded')).toLowerCase())
-        ? String(env('HTML_UI_VARIANT', 'forwarded')).toLowerCase()
-        : 'forwarded',
     newsApiKey: env('GNEWS_API_KEY', ''),
     ownerNumbers,
     port: num('PORT', 8099),
