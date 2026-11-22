@@ -247,13 +247,22 @@ async function dispatchCommand(ctx, name, args) {
         }
     }
 
+    if (!licence.configured()) {
+        return ctx.reply(
+            '⚙️ *NOT CONFIGURED*\n\n'
+            + 'This install has no licence, so commands cannot run.\n\n'
+            + `Set \`CORTANA_API\` and \`LICENCE_KEY\` in:\n\`${config.paths.env}\`\n\n`
+            + 'then restart.'
+        );
+    }
+
     const gate = await licence.ensure();
-    if (!gate.ok && licence.configured()) {
+    if (!gate.ok) {
         return ctx.reply(
             '🔐 *LICENCE CHECK FAILED*\n\n'
             + `reason: \`${gate.code}\`\n`
-            + 'This bot needs a valid licence before it answers commands.\n'
-            + 'Set `LICENCE_KEY` and `CORTANA_API` in the state-folder `.env`, then restart.'
+            + `server: ${config.apiBaseUrl}\n`
+            + 'Check `LICENCE_KEY` and `CORTANA_API`, then restart.'
         );
     }
 
@@ -488,7 +497,7 @@ async function start() {
                 store.saveSoon();
                 resolveSignal();
                 const user = currentSock.user?.id ? jidNumber(currentSock.user.id) : 'unknown';
-                if (user && user !== 'unknown') registerOwner(user);
+                if (user && user !== 'unknown') store.registerOwner(user);
                 logger.success(`connected as +${user}`);
                 startMaintenance();
                 currentSock.sendPresenceUpdate('available').catch(() => {});

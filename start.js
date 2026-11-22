@@ -6,6 +6,7 @@ const path = require('path');
 const config = require('./src/config');
 const logger = require('./src/logger');
 const store = require('./src/store');
+const licence = require('./src/licence');
 const bot = require('./src/bot');
 const panel = require('./src/panel');
 const pairingPrompt = require('./src/pairing-prompt');
@@ -73,6 +74,10 @@ process.on('uncaughtException', (error) => {
     logger.info(`state dir ${config.paths.home}`);
     for (const notice of config.notices) logger.warn(notice);
     logger.info(`prefix "${config.prefix}" · ${config.ownerNumbers.length} owner number(s) configured`);
+    if (!licence.configured()) {
+        logger.warn('no licence configured — commands will refuse to run');
+        logger.warn(`add CORTANA_API and LICENCE_KEY to ${config.paths.env} and restart`);
+    }
 
     const lock = acquireLock();
     if (!lock.ok) {

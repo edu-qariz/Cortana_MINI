@@ -6,6 +6,8 @@ const logger = require('./logger');
 const { C, art } = logger;
 const CYAN = C.brightCyan;
 const RED = C.brightRed;
+const GREEN = C.brightGreen;
+const YELLOW = C.yellow;
 
 function width() {
     const columns = Number(process.stdout.columns) || 50;
@@ -26,9 +28,9 @@ function printAsk(hint = '') {
     console.log('');
     for (const line of art()) console.log(`  ${line}`);
     console.log(`  ${rule('─')}`);
-    console.log(`  ${C.bold('Enter your number to pair')}`);
+    console.log(`  ${C.bold(GREEN('ENTER YOUR NUMBER TO PAIR'))}`);
     console.log('');
-    console.log(`  ${C.gray('NB//')} no ${C.gray('+')} · start with country code · 254712345678`);
+    console.log(`  ${YELLOW('No +, start with country like 254**')}`);
     console.log('');
     if (hint) {
         console.log(`  ${RED('✖')} ${hint}`);
