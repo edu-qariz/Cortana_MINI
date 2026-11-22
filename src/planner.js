@@ -205,8 +205,28 @@ function statusContent(ctx) {
 }
 
 const handlers = {
-    /** Letter-by-letter intro, same rhythm as the main bot: 80 ms per char, then a hold. */
+    /**
+     * Edits one message in place.
+     * `frames` — prank/progress sequences (no newsletter channel; optional fake quote).
+     * `text` — letter-by-letter intro, same rhythm as the main bot.
+     */
     async type(ctx, args) {
+        const frames = Array.isArray(args.frames) ? args.frames.map((frame) => String(frame || '')).filter(Boolean) : [];
+        if (frames.length) {
+            const mentions = Array.isArray(args.mentions) ? args.mentions.filter(Boolean) : undefined;
+            const options = args.quote === false ? undefined : { quoted: brand.fakeQuote() };
+            const body = (text) => (mentions ? { text, mentions } : { text });
+            const sent = await ctx.sock.sendMessage(ctx.chat, body(frames[0]), options);
+            const key = sent && sent.key;
+            if (!key) return { ok: false };
+            const wait = Math.max(200, Number(args.delayMs) || 900);
+            for (let i = 1; i < frames.length; i++) {
+                await new Promise((resolve) => setTimeout(resolve, wait));
+                await ctx.sock.sendMessage(ctx.chat, { ...body(frames[i]), edit: key });
+            }
+            return { ok: true, edited: frames.length };
+        }
+
         const text = String(args.text || '');
         if (!text) return { skipped: true };
         const characters = [...text];
@@ -571,7 +591,7 @@ async function run(ctx, plan) {
         try {
             const args = resolve(step.args || {}, vars);
             vars[step.id || step.use] = (await withTimeout(handler(ctx, args, vars), STEP_TIMEOUT_MS)) || {};
-            if (step.use === 'say' || step.use === 'media' || step.use === 'mutate') sent = true;
+            if (step.use === 'say' || step.use === 'media' || step.use === 'mutate' || step.use === 'type') sent = true;
         } catch (error) {
             logger.warn(`plan ${step.use} failed: ${error.code || error.message}`);
             if (step.onError === 'skip') continue;

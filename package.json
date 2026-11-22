@@ -1,6 +1,6 @@
 {
   "name": "cortana-mini",
-  "version": "2.3.15",
+  "version": "2.3.16",
   "private": true,
   "description": "CORTANA MINI V2.3 - lightweight WhatsApp bot with compact menu, usage replies and silent media actions",
   "main": "start.js",

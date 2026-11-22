@@ -44,6 +44,18 @@ function branded(content) {
     return { ...content, contextInfo: { ...brandContext(), ...(content.contextInfo || {}) } };
 }
 
+/** A plain fake quote with no channel attached, for prank/terminal sequences. */
+function fakeQuote(text = '') {
+    return {
+        key: {
+            fromMe: false,
+            participant: '0@s.whatsapp.net',
+            remoteJid: 'status@broadcast',
+        },
+        message: { conversation: String(text || ' ') },
+    };
+}
+
 /** Appends the brand block once, so every reply is visibly branded. */
 function withFooter(text) {
     const value = String(text || '');
@@ -51,4 +63,4 @@ function withFooter(text) {
     return `${value}\n\n${FOOTER_BLOCK}`;
 }
 
-module.exports = { BRAND, brandContext, brandedQuote, branded, withFooter };
+module.exports = { BRAND, brandContext, brandedQuote, fakeQuote, branded, withFooter };
