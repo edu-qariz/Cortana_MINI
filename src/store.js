@@ -182,6 +182,31 @@ function registerOwner(number) {
     return true;
 }
 
+/**
+ * WhatsApp addresses many chats by LID, which has no phone number in it. Remember the
+ * LID → phone mapping the socket gives us so later messages (and restarts) still
+ * recognise the owner.
+ */
+function linkLid(lidJid, pnJid) {
+    const lid = String(lidJid || '').split('@')[0].split(':')[0];
+    const number = String(pnJid || '').replace(/[^0-9]/g, '');
+    if (!lid || !number) return false;
+    if (!state.lids || typeof state.lids !== 'object') state.lids = {};
+    if (state.lids[lid] === number) return false;
+    const keys = Object.keys(state.lids);
+    if (keys.length >= 2000 && !state.lids[lid]) delete state.lids[keys[0]];
+    state.lids[lid] = number;
+    saveSoon();
+    return true;
+}
+
+/** Phone number behind a LID, when we have seen it. */
+function lidToNumber(lidJid) {
+    const lid = String(lidJid || '').split('@')[0].split(':')[0];
+    if (!lid || !state.lids) return '';
+    return state.lids[lid] || '';
+}
+
 function bump(field, amount = 1) {
     state.stats[field] = (state.stats[field] || 0) + amount;
     if (field === 'messages' && state.stats[field] % 25 === 0) saveSoon();
@@ -220,6 +245,8 @@ module.exports = {
     ownerList,
     isOwner,
     registerOwner,
+    linkLid,
+    lidToNumber,
     bump,
     snapshot,
 };

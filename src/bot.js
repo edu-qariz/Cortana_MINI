@@ -392,14 +392,36 @@ async function handleMessage(msg) {
         const isGroup = chat.endsWith('@g.us');
         const senderRaw = isGroup ? (msg.key.participant || msg.participant || '') : chat;
         const sender = normalizeJid(senderRaw) || chat;
-        const senderNum = jidNumber(sender);
+
+        // WhatsApp now addresses many chats by LID (@lid), which carries no phone number.
+        // Baileys 7 attaches the phone-number JID alongside it, so prefer that for
+        // identity checks and fall back to the LID only when it is missing.
+        const altRaw = isGroup
+            ? (msg.key.participantAlt || msg.participantAlt || '')
+            : (msg.key.remoteJidAlt || '');
+        const altSender = normalizeJid(altRaw) || '';
+        const senderNum = jidNumber(altSender) || jidNumber(sender);
+        const senderLid = String(sender).endsWith('@lid') ? sender : '';
+        if (altSender && senderLid) store.linkLid(senderLid, altSender);
+
         const settings = store.getSettings();
         const chatSettings = store.getChat(chat);
         const prefix = settings.prefix || '.';
         const fromMe = Boolean(msg.key.fromMe);
         const selfIds = [jidNumber(sock.user?.id), jidNumber(sock.user?.lid)].filter(Boolean);
-        const isSelf = fromMe && (!senderNum || selfIds.includes(senderNum));
-        const isOwner = config.ownerNumbers.includes(senderNum) || store.isOwner(senderNum) || isSelf;
+        // Anything sent from the paired account IS the owner, exactly like the MD bot
+        // (`isOwner = m.key.fromMe || …`). LID formats made the old number match fail.
+        const isSelf = fromMe;
+        // An LID that already resolved to an owner number counts as the owner.
+        const linkedNumber = senderLid ? store.lidToNumber(senderLid) : '';
+        const knownOwnerLid = linkedNumber
+            && (config.ownerNumbers.includes(linkedNumber) || store.isOwner(linkedNumber))
+            ? linkedNumber
+            : '';
+        const isOwner = config.ownerNumbers.includes(senderNum)
+            || store.isOwner(senderNum)
+            || Boolean(knownOwnerLid)
+            || isSelf;
         const isCommand = text.startsWith(prefix);
         // "Message yourself" is a DM like any other; the owner tests the chatbot there.
         const selfChat = selfIds.includes(jidNumber(chat));
@@ -575,6 +597,10 @@ async function start() {
                 resolveSignal();
                 const user = currentSock.user?.id ? jidNumber(currentSock.user.id) : 'unknown';
                 if (user && user !== 'unknown') store.registerOwner(user);
+                // Keep the bot's own LID mapped to its phone number for owner checks.
+                if (currentSock.user?.lid && user && user !== 'unknown') {
+                    store.linkLid(currentSock.user.lid, `${user}@s.whatsapp.net`);
+                }
                 logger.success(`connected as +${user}`);
                 startMaintenance();
                 currentSock.sendPresenceUpdate('available').catch(() => {});
