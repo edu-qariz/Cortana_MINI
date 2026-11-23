@@ -41,7 +41,7 @@ const groupMetaCache = new TTLMap({ ttlMs: 5 * 60_000, max: 200, name: 'groupMet
 const messageCache = new TTLMap({ ttlMs: 10 * 60_000, max: 400, name: 'antiDelete' });
 // Raw incoming messages, kept briefly so `.vv` can recover a view-once copy whose
 // quoted stub arrived without directPath.
-const recentMessages = new TTLMap({ ttlMs: 15 * 60_000, max: 300, name: 'recent' });
+const recentMessages = new TTLMap({ ttlMs: 45 * 60_000, max: 400, name: 'recent' });
 const retryCache = new TTLMap({ ttlMs: 60_000, max: 250, name: 'retry' });
 const seen = new SeenSet({ ttlMs: 120_000, max: 4000 });
 const limiter = new RateLimiter({ limit: config.rateLimitPer10s, windowMs: 10_000 });
