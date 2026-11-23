@@ -499,8 +499,26 @@ const handlers = {
             }
         }
 
-        rows = rows.slice(0, 10);
-        if (!rows.length) return { skipped: true };
+        // Explicit sections win; otherwise the flat rows get one section.
+        const sections = Array.isArray(args.sections) && args.sections.length
+            ? args.sections
+                .map((section) => ({
+                    title: String((section && section.title) || '').slice(0, 24),
+                    rows: (Array.isArray(section && section.rows) ? section.rows : [])
+                        .filter((row) => row && row.id)
+                        .map(makeRow)
+                        .slice(0, 10),
+                }))
+                .filter((section) => section.rows.length)
+                .slice(0, 8)
+            : null;
+
+        if (!sections) {
+            rows = rows.slice(0, 10);
+            if (!rows.length) return { skipped: true };
+        } else if (!sections.length) {
+            return { skipped: true };
+        }
 
         const baileys = require('@whiskeysockets/baileys');
         const { generateWAMessageFromContent, proto } = baileys;
@@ -527,7 +545,7 @@ const handlers = {
                         name: 'single_select',
                         buttonParamsJson: JSON.stringify({
                             title: buttonTitle,
-                            sections: [{ title: sectionTitle, rows }],
+                            sections: sections || [{ title: sectionTitle, rows }],
                         }),
                     },
                 ],
@@ -565,14 +583,20 @@ const handlers = {
                     },
                 ],
             });
+            const total = sections
+                ? sections.reduce((sum, section) => sum + section.rows.length, 0)
+                : rows.length;
             logger.outgoing({ chat: ctx.chat, kind: 'select', preview: buttonTitle, ms: 0 });
-            return { ok: true, rows: rows.length };
+            return { ok: true, rows: total };
         } catch (error) {
             // Never leave the chat with a dead picker: print the same list as text.
             logger.warn(`select relay failed: ${error.message} — falling back to text`);
-            const list = rows.map((row) => `${row.id}${row.description ? ` — ${row.description}` : ''}`).join('\n');
+            const flat = sections
+                ? sections.flatMap((section) => section.rows)
+                : rows;
+            const list = flat.map((row) => `${row.id}${row.description ? ` — ${row.description}` : ''}`).join('\n');
             await ctx.reply(body ? `${body}\n\n${list}` : list);
-            return { ok: true, rows: rows.length, fallback: 'text' };
+            return { ok: true, rows: flat.length, fallback: 'text' };
         }
     },
 
