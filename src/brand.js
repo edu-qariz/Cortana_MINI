@@ -47,10 +47,15 @@ function brandedQuote() {
     return fakeQuote();
 }
 
-/** Appends the brand block once, so every reply is visibly branded. */
+/** Appends the brand block once. A bare copyright line also counts as branded by
+ * the worker, so upgrade that to the full block instead of leaving it unbranded. */
 function withFooter(text) {
-    const value = String(text || '');
-    if (!value || value.includes(BRAND.footer)) return value;
+    let value = String(text || '').trim();
+    if (!value) return value;
+    if (value.includes(BRAND.signature)) return value;
+    const bare = `èdûqarîz · ${BRAND.footer}`;
+    if (value.endsWith(bare)) value = value.slice(0, -bare.length).trimEnd();
+    if (!value) return FOOTER_BLOCK;
     return `${value}\n\n${FOOTER_BLOCK}`;
 }
 

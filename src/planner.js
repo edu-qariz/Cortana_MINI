@@ -530,7 +530,7 @@ const handlers = {
         if (!generateWAMessageFromContent) throw planError('select_unsupported', 'interactive messages need a newer baileys');
 
         const body = String(args.text || '') || ' ';
-        const footer = String(args.footer || '');
+        const footer = brand.withFooter(String(args.footer || ''));
         const buttonTitle = String(args.buttonTitle || 'SELECT').slice(0, 24);
         const sectionTitle = String(args.sectionTitle || '');
         const headerTitle = String(args.headerTitle || '');
