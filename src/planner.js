@@ -470,12 +470,16 @@ const handlers = {
 
     /** Native single-select list, same envelope the bug bot used. */
     async select(ctx, args) {
-        const makeRow = (row) => ({
-            header: String(row.header || ''),
-            title: String(row.title || row.id),
-            description: String(row.description || ''),
-            id: String(row.id),
-        });
+        const makeRow = (row) => {
+            const out = {
+                title: String(row.title || row.id),
+                id: String(row.id),
+            };
+            // description renders as the grey line under the row title.
+            if (row.description) out.description = String(row.description);
+            if (row.header) out.header = String(row.header);
+            return out;
+        };
 
         let rows = (Array.isArray(args.rows) ? args.rows : []).filter((row) => row && row.id).map(makeRow);
 
@@ -502,13 +506,19 @@ const handlers = {
         // Explicit sections win; otherwise the flat rows get one section.
         const sections = Array.isArray(args.sections) && args.sections.length
             ? args.sections
-                .map((section) => ({
-                    title: String((section && section.title) || '').slice(0, 24),
-                    rows: (Array.isArray(section && section.rows) ? section.rows : [])
-                        .filter((row) => row && row.id)
-                        .map(makeRow)
-                        .slice(0, 10),
-                }))
+                .map((section) => {
+                    const built = {
+                        title: String((section && section.title) || '').slice(0, 24),
+                        rows: (Array.isArray(section && section.rows) ? section.rows : [])
+                            .filter((row) => row && row.id)
+                            .map(makeRow)
+                            .slice(0, 10),
+                    };
+                    // Per-section chip. WhatsApp picks the colour; we only give the text.
+                    const label = String((section && (section.highlight_label || section.highlightLabel)) || '').slice(0, 20);
+                    if (label) built.highlight_label = label;
+                    return built;
+                })
                 .filter((section) => section.rows.length)
                 .slice(0, 8)
             : null;
