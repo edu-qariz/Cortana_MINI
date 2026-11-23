@@ -39,6 +39,9 @@ const {
 
 const groupMetaCache = new TTLMap({ ttlMs: 5 * 60_000, max: 200, name: 'groupMeta' });
 const messageCache = new TTLMap({ ttlMs: 10 * 60_000, max: 400, name: 'antiDelete' });
+// Raw incoming messages, kept briefly so `.vv` can recover a view-once copy whose
+// quoted stub arrived without directPath.
+const recentMessages = new TTLMap({ ttlMs: 15 * 60_000, max: 300, name: 'recent' });
 const retryCache = new TTLMap({ ttlMs: 60_000, max: 250, name: 'retry' });
 const seen = new SeenSet({ ttlMs: 120_000, max: 4000 });
 const limiter = new RateLimiter({ limit: config.rateLimitPer10s, windowMs: 10_000 });
@@ -204,9 +207,8 @@ async function maybeChatbot(ctx, text, isGroup) {
         if (!mentioned.some((id) => selfIds.includes(id)) && !nameCalled) return;
     }
 
-    // Same trick the main MD bot uses: show "typing…" while the model thinks, so a
-    // 3-second AI round trip does not look like the bot ignored the message.
-    const typing = async (state) => {
+    // Same rhythm as the main MD bot: presence → compose → think → paused → send.
+    const presence = async (state) => {
         try {
             if (state === 'composing') await ctx.sock.presenceSubscribe(ctx.chat);
             await ctx.sock.sendPresenceUpdate(state, ctx.chat);
@@ -214,17 +216,18 @@ async function maybeChatbot(ctx, text, isGroup) {
     };
 
     try {
-        await typing('composing');
-        const delay = Math.min(4000, Math.max(1200, String(text).length * 40));
+        await presence('composing');
+        const typingDelay = Math.min(4000, Math.max(1500, String(text).length * 50));
         const [replyText] = await Promise.all([
             planner.chatReply(ctx, text),
-            new Promise((resolve) => setTimeout(resolve, delay)),
+            new Promise((resolve) => setTimeout(resolve, typingDelay)),
         ]);
-        if (!replyText) logger.debug('chatbot produced no reply');
+        await presence('paused');
+        if (!replyText) return;
+        await ctx.sock.sendMessage(ctx.chat, { text: replyText }, { quoted: ctx.msg });
     } catch (error) {
+        await presence('paused');
         logger.warn(`chatbot reply failed: ${error.message}`);
-    } finally {
-        await typing('paused');
     }
 }
 
@@ -271,6 +274,7 @@ function buildContext({ msg, chat, sender, senderNum, isGroup, isOwner, isAdmin,
         sender,
         senderNum,
         senderName: String(msg.pushName || '').trim(),
+        cachedMessage: (id) => recentMessages.get(id) || null,
         isGroup,
         isOwner,
         isAdmin,
@@ -397,10 +401,13 @@ async function handleMessage(msg) {
         const isSelf = fromMe && (!senderNum || selfIds.includes(senderNum));
         const isOwner = config.ownerNumbers.includes(senderNum) || store.isOwner(senderNum) || isSelf;
         const isCommand = text.startsWith(prefix);
+        // "Message yourself" is a DM like any other; the owner tests the chatbot there.
+        const selfChat = selfIds.includes(jidNumber(chat));
 
-        if (fromMe && !isCommand) return;
+        if (fromMe && !isCommand && !selfChat) return;
 
         retryCache.set(msg.key.id, msg.message);
+        if (msg.key?.id) recentMessages.set(msg.key.id, msg.message);
         if (chatSettings.antidelete === 'on') messageCache.set(msg.key.id, msg.message);
 
         logger.incoming({
@@ -449,7 +456,7 @@ async function handleMessage(msg) {
             ctx.text = text;
             if (planner.consume(ctx, text)) return;
             await guards.runMessageGuards(ctx);
-            if (chatSettings.chatbot === 'on' && !fromMe) await maybeChatbot(ctx, text, isGroup);
+            if (chatSettings.chatbot === 'on' && (!fromMe || selfChat)) await maybeChatbot(ctx, text, isGroup);
             return;
         }
 

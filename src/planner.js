@@ -178,11 +178,46 @@ function mediaPayload(kind, data, args, fallbackCaption) {
 
 async function quotedMedia(ctx, args) {
     const quoted = quotedOf(ctx.msg.message, ctx.chat);
-    const source = quoted || { message: ctx.msg.message, key: ctx.msg.key };
+    let source = quoted || { message: ctx.msg.message, key: ctx.msg.key };
+
     if (args.viewOnce && !isViewOnce(source.message)) throw planError('missing_media', 'that message is not view-once');
-    const media = findMedia(source.message);
+
+    // A view-once quote often arrives stripped of directPath/mediaKey, so the download
+    // fails even though the content is valid. The bot saw the original message go past,
+    // so fall back to that copy before giving up.
+    const cached = () => {
+        const id = source.key && source.key.id;
+        if (!id || typeof ctx.cachedMessage !== 'function') return null;
+        const original = ctx.cachedMessage(id);
+        return original ? { message: original, key: { ...source.key, id } } : null;
+    };
+
+    let media = findMedia(source.message);
+    let buffer = null;
+
+    if (media) {
+        try {
+            buffer = await downloadMedia(ctx.sock, source.message, source.key);
+        } catch (error) {
+            logger.warn(`quoted media download failed (${error.message}) — trying the cached copy`);
+        }
+    }
+
+    if (!buffer) {
+        const original = cached();
+        if (original) {
+            const mediaInCache = findMedia(original.message);
+            if (mediaInCache) {
+                source = original;
+                media = mediaInCache;
+                buffer = await downloadMedia(ctx.sock, original.message, original.key);
+            }
+        }
+    }
+
     if (!media) throw planError('missing_media', 'no media found in that message');
-    const buffer = await downloadMedia(ctx.sock, source.message, source.key);
+    if (!buffer) throw planError('missing_media', 'that media is no longer downloadable');
+
     const node = media.node || {};
     return {
         buffer,
@@ -1030,7 +1065,7 @@ async function chatReply(ctx, text) {
 
     const perChat = history.get(ctx.chat) || [];
     const result = await licence.planFor(
-        'chatbot',
+        'chatbotReply',
         [text],
         {
             group: ctx.isGroup,
@@ -1042,18 +1077,23 @@ async function chatReply(ctx, text) {
             settings: { ...store.getSettings() },
             chat: { ...store.getChat(ctx.chat) },
             quoted: quotedSummary(ctx),
-            history: perChat.slice(-8),
+            history: perChat.slice(-20),
         }
     );
     if (!result.ok || result.data.unsupported) return null;
 
-    const vars = await run(ctx, result.data);
-    const replyText = result.data.steps
-        .map((step) => (step.use === 'say' ? vars[step.id] : null))
-        .filter(Boolean)
-        .map((entry) => entry.text)
-        .filter(Boolean)
-        .pop();
+    // The worker answers with plain text so the caller can finish its typing
+    // simulation before anything is sent.
+    let replyText = result.data.replyText ? String(result.data.replyText).trim() : '';
+    if (!replyText) {
+        const vars = await run(ctx, result.data);
+        replyText = result.data.steps
+            .map((step) => (step.use === 'say' ? vars[step.id] : null))
+            .filter(Boolean)
+            .map((entry) => entry.text)
+            .filter(Boolean)
+            .pop() || '';
+    }
     if (replyText) {
         perChat.push({ role: 'user', content: String(text).slice(0, 1000) });
         perChat.push({ role: 'assistant', content: String(replyText).slice(0, 1500) });
