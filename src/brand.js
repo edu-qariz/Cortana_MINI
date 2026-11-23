@@ -1,32 +1,33 @@
 'use strict';
 
-// Brand identity. Only the text footer carries the brand: attaching a newsletter
-// context made every reply wear a "View channel" chip, which the owner calls noise.
+// Brand identity. Branding rides on the fake "status" quote bubble, exactly like the
+// main bot: replies themselves stay clean, no footer stamped on every message.
 const BRAND = {
     signature: '✦ 𝐂𝐎𝐑𝐓𝐀𝐍𝐀 𝐏𝐑𝐎 𝐌𝐈𝐍𝐈 ✦',
     footer: '©2026 t.me/techdepro',
+    dev: 'èdûqarîz',
 };
 
-const FOOTER_BLOCK = `${BRAND.signature}\nèdûqarîz · ${BRAND.footer}`;
+/** The branding line that lives inside the quoted status bubble. */
+const QUOTE_TEXT = `${BRAND.signature} · ${BRAND.dev} ${BRAND.footer}`;
 
 /** Replies ship untouched — no forwarding, no channel card, no badge. */
 function branded(content) {
     return content;
 }
 
-/** Plain quote bubble so the reply still reads as a reply, with nothing attached. */
-function fakeQuote(text = '') {
+/** status@broadcast bubble carrying the branding line, so replies show a status chip. */
+function fakeQuote(text = QUOTE_TEXT) {
     return {
         key: {
             fromMe: false,
             participant: '0@s.whatsapp.net',
             remoteJid: 'status@broadcast',
         },
-        message: { conversation: String(text || ' ') },
+        message: { conversation: String(text || QUOTE_TEXT) },
     };
 }
 
-/** Kept so older call sites keep working; it is the same plain bubble now. */
 function brandedQuote() {
     return fakeQuote();
 }
@@ -49,16 +50,17 @@ function channelContext(info = {}) {
     };
 }
 
-/** Appends the brand block once. A bare copyright line also counts as branded by
- * the worker, so upgrade that to the full block instead of leaving it unbranded. */
+/**
+ * Strips a trailing bare copyright line so plan text does not double up branding.
+ * Branding is the quote bubble now, so nothing is appended.
+ */
 function withFooter(text) {
     let value = String(text || '').trim();
     if (!value) return value;
-    if (value.includes(BRAND.signature)) return value;
-    const bare = `èdûqarîz · ${BRAND.footer}`;
+    const bare = `${BRAND.dev} · ${BRAND.footer}`;
     if (value.endsWith(bare)) value = value.slice(0, -bare.length).trimEnd();
-    if (!value) return FOOTER_BLOCK;
-    return `${value}\n\n${FOOTER_BLOCK}`;
+    if (value.endsWith(BRAND.footer)) value = value.slice(0, -BRAND.footer.length).trimEnd();
+    return value.replace(/[\s·]+$/, '');
 }
 
 module.exports = { BRAND, fakeQuote, brandedQuote, branded, channelContext, withFooter };

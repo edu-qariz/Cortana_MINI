@@ -335,8 +335,12 @@ const handlers = {
         const text = brand.withFooter(String(args.text || ''));
         if (!text) return { skipped: true };
         const mentions = Array.isArray(args.mentions) ? args.mentions : undefined;
-        // No status@broadcast quote: it rendered as a bare "status" chip, not branding.
-        await ctx.sock.sendMessage(ctx.chat, mentions ? { text, mentions } : { text });
+        // Branding rides on the quoted status bubble; the message body stays clean.
+        await ctx.sock.sendMessage(
+            ctx.chat,
+            mentions ? { text, mentions } : { text },
+            { quoted: brand.fakeQuote() }
+        );
         logger.outgoing({ chat: ctx.chat, kind: 'text', preview: text, ms: 0 });
         return { ok: true };
     },
@@ -488,7 +492,7 @@ const handlers = {
             await ctx.sock.sendMessage(target, payload);
             logger.outgoing({ chat: target, kind, preview: '[media]', ms: 0 });
         } else {
-            await ctx.sock.sendMessage(ctx.chat, payload);
+            await ctx.sock.sendMessage(ctx.chat, payload, { quoted: brand.fakeQuote() });
             logger.outgoing({ chat: ctx.chat, kind, preview: '[media]', ms: 0 });
         }
         return { ok: true };
