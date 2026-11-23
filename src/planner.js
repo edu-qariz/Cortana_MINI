@@ -708,18 +708,33 @@ const handlers = {
             const target = String(args.jid || '');
             if (!target.includes('@')) throw planError('bad_target', 'not a jid');
             const full = `+${String(target).split('@')[0].replace(/[^0-9]/g, '')}`;
+            const failureCode = (error) => error?.data || error?.output?.statusCode || error?.response?.status;
+            const denied = (error) => {
+                const code = failureCode(error);
+                return code === 401 || code === 403;
+            };
+
             const found = await ctx.sock.onWhatsApp(target).catch(() => null);
             const registered = Boolean(found && found.length && found[0].exists);
+
+            // A banned account still answers onWhatsApp; the tell is that every
+            // authenticated call comes back 401/403. Probe both, like the MD checker.
             let restricted = false;
             if (registered) {
-                const failureCode = (error) => error?.data || error?.output?.statusCode || error?.response?.status;
                 try {
                     await ctx.sock.fetchStatus(target);
                 } catch (error) {
-                    const code = failureCode(error);
-                    if (code === 401 || code === 403) restricted = true;
+                    if (denied(error)) restricted = true;
+                }
+                if (!restricted) {
+                    try {
+                        await ctx.sock.profilePictureUrl(target, 'image');
+                    } catch (error) {
+                        if (denied(error)) restricted = true;
+                    }
                 }
             }
+
             return {
                 registered,
                 restricted,
