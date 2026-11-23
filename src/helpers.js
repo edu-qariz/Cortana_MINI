@@ -38,14 +38,24 @@ function unwrap(message) {
     return node;
 }
 
+/**
+ * View-once detection. WhatsApp strips the envelope when the message arrives as a
+ * reply quote: the context carries a bare imageMessage/videoMessage/audioMessage with
+ * `viewOnce: true` instead of a viewOnceMessageV2 wrapper. Check both shapes.
+ */
 function isViewOnce(message) {
-    return Boolean(
-        message?.viewOnceMessage ||
-        message?.viewOnceMessageV2 ||
-        message?.viewOnceMessageV2Extension ||
-        unwrap(message)?.viewOnceMessage ||
-        unwrap(message)?.viewOnceMessageV2
-    );
+    if (!message) return false;
+    if (message.viewOnceMessage || message.viewOnceMessageV2 || message.viewOnceMessageV2Extension) return true;
+
+    const node = unwrap(normalizeMessageContent(message));
+    if (!node) return false;
+    if (node.viewOnceMessage || node.viewOnceMessageV2 || node.viewOnceMessageV2Extension) return true;
+
+    for (const key of Object.keys(MEDIA_KINDS)) {
+        const media = node[key];
+        if (media && (media.viewOnce === true || media.viewOnce === 1)) return true;
+    }
+    return false;
 }
 
 function extractText(message) {
@@ -327,10 +337,17 @@ async function postStatus(sock, recipients, content) {
         options.font = nextStatusFont();
     }
     const inside = await generateWAMessageContent(content, options);
-    const message = generateWAMessageFromContent('status@broadcast', inside, {});
+    // Status messages must be attributed to the connected account, otherwise WhatsApp
+    // accepts the stanza and never shows it to anyone.
+    const message = generateWAMessageFromContent('status@broadcast', inside, {
+        userJid: sock.user?.id,
+    });
+    const audience = [...new Set(recipients.filter(Boolean))];
+    const self = jidNumber(sock.user?.id);
+    if (self) audience.unshift(`${self}@s.whatsapp.net`);
     await sock.relayMessage('status@broadcast', message.message, {
         messageId: message.key.id,
-        statusJidList: recipients,
+        statusJidList: [...new Set(audience)],
     });
     return message;
 }

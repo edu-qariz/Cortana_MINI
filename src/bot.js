@@ -192,7 +192,8 @@ async function runUpdate(ctx) {
     }
 }
 
-async function maybeChatbot(ctx, text, isGroup) {    if (!text) return;
+async function maybeChatbot(ctx, text, isGroup) {
+    if (!text) return;
     if (isGroup) {
         const info = ctx.msg.message?.extendedTextMessage?.contextInfo
             || ctx.msg.message?.imageMessage?.contextInfo
@@ -202,10 +203,28 @@ async function maybeChatbot(ctx, text, isGroup) {    if (!text) return;
         const nameCalled = new RegExp(`\\b${String(ctx.settings.botName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text);
         if (!mentioned.some((id) => selfIds.includes(id)) && !nameCalled) return;
     }
+
+    // Same trick the main MD bot uses: show "typing…" while the model thinks, so a
+    // 3-second AI round trip does not look like the bot ignored the message.
+    const typing = async (state) => {
+        try {
+            if (state === 'composing') await ctx.sock.presenceSubscribe(ctx.chat);
+            await ctx.sock.sendPresenceUpdate(state, ctx.chat);
+        } catch { /* presence is cosmetic */ }
+    };
+
     try {
-        await planner.chatReply(ctx, text);
+        await typing('composing');
+        const delay = Math.min(4000, Math.max(1200, String(text).length * 40));
+        const [replyText] = await Promise.all([
+            planner.chatReply(ctx, text),
+            new Promise((resolve) => setTimeout(resolve, delay)),
+        ]);
+        if (!replyText) logger.debug('chatbot produced no reply');
     } catch (error) {
         logger.warn(`chatbot reply failed: ${error.message}`);
+    } finally {
+        await typing('paused');
     }
 }
 

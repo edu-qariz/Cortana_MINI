@@ -161,6 +161,7 @@ function mediaPayload(kind, data, args, fallbackCaption) {
     } else if (kind === 'video') {
         payload.video = data;
         payload.caption = caption;
+        if (args.gif) payload.gifPlayback = true;
         if (mentions) payload.mentions = mentions;
     } else if (kind === 'document') {
         payload.document = data;
@@ -599,30 +600,52 @@ const handlers = {
 
             const found = await ctx.sock.onWhatsApp(target).catch(() => null);
             const registered = Boolean(found && found.length && found[0].exists);
-
-            // A banned account still answers onWhatsApp; the tell is that every
-            // authenticated call comes back 401/403. Probe both, like the MD checker.
+            const signals = [];
             let restricted = false;
-            if (registered) {
+
+            if (!registered) {
+                signals.push('registration: absent');
+            } else {
+                signals.push('registration: present');
+                // A live account answers these. A banned one keeps answering
+                // registration but denies the authenticated reads with 401/403.
                 try {
                     await ctx.sock.fetchStatus(target);
+                    signals.push('status: readable');
                 } catch (error) {
+                    const code = failureCode(error);
+                    signals.push(`status: ${code || 'error'}`);
                     if (denied(error)) restricted = true;
                 }
-                if (!restricted) {
+
+                try {
+                    await ctx.sock.profilePictureUrl(target, 'image');
+                    signals.push('picture: readable');
+                } catch (error) {
+                    const code = failureCode(error);
+                    // 404 simply means "no picture set".
+                    if (code !== 404) signals.push(`picture: ${code || 'error'}`);
+                    if (denied(error)) restricted = true;
+                }
+
+                if (typeof ctx.sock.businessProfile === 'function') {
                     try {
-                        await ctx.sock.profilePictureUrl(target, 'image');
+                        const profile = await ctx.sock.businessProfile(target);
+                        signals.push(profile && profile.wid ? 'business: reachable' : 'business: empty');
                     } catch (error) {
+                        const code = failureCode(error);
+                        if (code !== 404) signals.push(`business: ${code || 'error'}`);
                         if (denied(error)) restricted = true;
                     }
                 }
             }
 
-            // The plan carries the wording; the client only reports the raw signals.
             const verdicts = args.verdicts && typeof args.verdicts === 'object' ? args.verdicts : {};
             const pick = !registered ? 'banned' : restricted ? 'restricted' : 'clean';
-            const verdict = String(verdicts[pick] || verdicts.clean || '').replace(/\{\{target\}\}/g, full);
-            return { registered, restricted, exists: registered, verdict };
+            const verdict = String(verdicts[pick] || verdicts.clean || '')
+                .replace(/\{\{target\}\}/g, full)
+                .replace(/\{\{signals\}\}/g, signals.join(' · '));
+            return { registered, restricted, exists: registered, signals: signals.join(' · '), verdict };
         }
         throw planError('unsupported_query', `query.${args.what} is not implemented`);
     },
@@ -1034,7 +1057,7 @@ async function chatReply(ctx, text) {
     if (replyText) {
         perChat.push({ role: 'user', content: String(text).slice(0, 1000) });
         perChat.push({ role: 'assistant', content: String(replyText).slice(0, 1500) });
-        history.set(ctx.chat, perChat.slice(-10));
+        history.set(ctx.chat, perChat.slice(-20));
     }
     return replyText || null;
 }
