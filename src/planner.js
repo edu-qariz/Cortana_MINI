@@ -208,9 +208,13 @@ async function quotedMedia(ctx, args) {
         if (original) {
             const mediaInCache = findMedia(original.message);
             if (mediaInCache) {
-                source = original;
-                media = mediaInCache;
-                buffer = await downloadMedia(ctx.sock, original.message, original.key);
+                try {
+                    buffer = await downloadMedia(ctx.sock, original.message, original.key);
+                    source = original;
+                    media = mediaInCache;
+                } catch (error) {
+                    logger.warn(`cached media download failed (${error.message})`);
+                }
             }
         }
     }

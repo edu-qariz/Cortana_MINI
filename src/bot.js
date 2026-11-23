@@ -384,6 +384,13 @@ async function handleMessage(msg) {
         }
         if (msg.message.reactionMessage) return;
 
+        // Cache before any routing filter: a view-once quote arrives stripped of its
+        // directPath/mediaKey, so the only copy that can be downloaded is this one.
+        if (msg.key?.id) {
+            retryCache.set(msg.key.id, msg.message);
+            recentMessages.set(msg.key.id, msg.message);
+        }
+
         store.bump('messages');
         if (chat.endsWith('@s.whatsapp.net')) store.addContact(chat);
 
@@ -428,9 +435,7 @@ async function handleMessage(msg) {
 
         if (fromMe && !isCommand && !selfChat) return;
 
-        retryCache.set(msg.key.id, msg.message);
-        if (msg.key?.id) recentMessages.set(msg.key.id, msg.message);
-        if (chatSettings.antidelete === 'on') messageCache.set(msg.key.id, msg.message);
+        if (msg.key?.id && chatSettings.antidelete === 'on') messageCache.set(msg.key.id, msg.message);
 
         logger.incoming({
             chat,
