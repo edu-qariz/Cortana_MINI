@@ -42,6 +42,7 @@ const messageCache = new TTLMap({ ttlMs: 10 * 60_000, max: 400, name: 'antiDelet
 // Raw incoming messages, kept briefly so `.vv` can recover a view-once copy whose
 // quoted stub arrived without directPath.
 const recentMessages = new TTLMap({ ttlMs: 45 * 60_000, max: 400, name: 'recent' });
+const lastMedia = new TTLMap({ ttlMs: 45 * 60_000, max: 120, name: 'lastmedia' });
 const retryCache = new TTLMap({ ttlMs: 60_000, max: 250, name: 'retry' });
 const seen = new SeenSet({ ttlMs: 120_000, max: 4000 });
 const limiter = new RateLimiter({ limit: config.rateLimitPer10s, windowMs: 10_000 });
@@ -275,6 +276,8 @@ function buildContext({ msg, chat, sender, senderNum, isGroup, isOwner, isAdmin,
         senderNum,
         senderName: String(msg.pushName || '').trim(),
         cachedMessage: (id) => recentMessages.get(id) || null,
+        recent: () => recentMessages.entries(),
+        lastMediaInChat: () => lastMedia.get(chat) || null,
         isGroup,
         isOwner,
         isAdmin,
@@ -389,6 +392,7 @@ async function handleMessage(msg) {
         if (msg.key?.id) {
             retryCache.set(msg.key.id, msg.message);
             recentMessages.set(msg.key.id, msg.message);
+            if (findMedia(msg.message)) lastMedia.set(chat, { id: msg.key.id, message: msg.message });
         }
 
         store.bump('messages');
@@ -556,7 +560,18 @@ async function start() {
 
         currentSock.ev.on('messages.upsert', async (payload) => {
             if (sock !== currentSock) return;
-            if (payload.type !== 'notify') return;
+            if (payload.type !== 'notify') {
+                // Own-device echoes and history replays are not commands, but a view-once
+                // photo sent from the phone only arrives this way — keep it so .vv can work.
+                for (const message of payload.messages || []) {
+                    if (!message?.key?.id || !message.message) continue;
+                    retryCache.set(message.key.id, message.message);
+                    recentMessages.set(message.key.id, message.message);
+                    const jid = message.key.remoteJid;
+                    if (jid && findMedia(message.message)) lastMedia.set(jid, { id: message.key.id, message: message.message });
+                }
+                return;
+            }
             for (const message of payload.messages || []) {
                 await handleMessage(message);
             }

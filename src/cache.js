@@ -49,6 +49,19 @@ class TTLMap {
         this.map.clear();
     }
 
+    entries() {
+        const now = Date.now();
+        const out = [];
+        for (const [key, entry] of this.map) {
+            if (entry.expires <= now) {
+                this.map.delete(key);
+                continue;
+            }
+            out.push([key, entry.value]);
+        }
+        return out;
+    }
+
     get size() {
         return this.map.size;
     }

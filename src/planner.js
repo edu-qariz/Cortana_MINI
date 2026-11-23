@@ -176,52 +176,7 @@ function mediaPayload(kind, data, args, fallbackCaption) {
     return payload;
 }
 
-async function quotedMedia(ctx, args) {
-    const quoted = quotedOf(ctx.msg.message, ctx.chat);
-    let source = quoted || { message: ctx.msg.message, key: ctx.msg.key };
-
-    if (args.viewOnce && !isViewOnce(source.message)) throw planError('missing_media', 'that message is not view-once');
-
-    // A view-once quote often arrives stripped of directPath/mediaKey, so the download
-    // fails even though the content is valid. The bot saw the original message go past,
-    // so fall back to that copy before giving up.
-    const cached = () => {
-        const id = source.key && source.key.id;
-        if (!id || typeof ctx.cachedMessage !== 'function') return null;
-        const original = ctx.cachedMessage(id);
-        return original ? { message: original, key: { ...source.key, id } } : null;
-    };
-
-    let media = findMedia(source.message);
-    let buffer = null;
-
-    if (media) {
-        try {
-            buffer = await downloadMedia(ctx.sock, source.message, source.key);
-        } catch (error) {
-            logger.warn(`quoted media download failed (${error.message}) — trying the cached copy`);
-        }
-    }
-
-    if (!buffer) {
-        const original = cached();
-        if (original) {
-            const mediaInCache = findMedia(original.message);
-            if (mediaInCache) {
-                try {
-                    buffer = await downloadMedia(ctx.sock, original.message, original.key);
-                    source = original;
-                    media = mediaInCache;
-                } catch (error) {
-                    logger.warn(`cached media download failed (${error.message})`);
-                }
-            }
-        }
-    }
-
-    if (!media) throw planError('missing_media', 'no media found in that message');
-    if (!buffer) throw planError('missing_media', 'that media is no longer downloadable');
-
+function packMedia(media, buffer) {
     const node = media.node || {};
     return {
         buffer,
@@ -230,6 +185,67 @@ async function quotedMedia(ctx, args) {
         caption: node.caption || '',
         fileName: node.fileName || '',
     };
+}
+
+async function quotedMedia(ctx, args) {
+    const quoted = quotedOf(ctx.msg.message, ctx.chat);
+    const primary = quoted || { message: ctx.msg.message, key: ctx.msg.key };
+
+    if (args.viewOnce && !isViewOnce(primary.message)) throw planError('missing_media', 'that message is not view-once');
+
+    const media = findMedia(primary.message);
+    if (media) {
+        try {
+            return packMedia(media, await downloadMedia(ctx.sock, primary.message, primary.key));
+        } catch (error) {
+            logger.warn(`quoted media download failed (${error.message}) — trying the cached copy`);
+        }
+    }
+
+    // A view-once quote arrives stripped of url/directPath (WhatsApp only keeps the key),
+    // so the only downloadable copy is the one the bot cached when it first went past.
+    const node = media?.node || {};
+    const marks = [node.mediaKey, node.fileSha256].filter(Boolean).map(String);
+    const suspects = [];
+    const remember = (id, message) => {
+        if (!message || !id) return;
+        if (suspects.some((entry) => entry.key.id === id)) return;
+        suspects.push({ message, key: { ...primary.key, id } });
+    };
+
+    if (primary.key?.id && typeof ctx.cachedMessage === 'function') {
+        remember(primary.key.id, ctx.cachedMessage(primary.key.id));
+    }
+    // Same media key/file hash anywhere in the cache: survives a missing or mismatched stanzaId.
+    const recent = typeof ctx.recent === 'function' ? ctx.recent() : [];
+    if (marks.length) {
+        for (const [id, message] of recent) {
+            const cachedNode = findMedia(message)?.node;
+            if (!cachedNode) continue;
+            if (marks.includes(String(cachedNode.mediaKey)) || marks.includes(String(cachedNode.fileSha256))) {
+                remember(id, message);
+            }
+        }
+    }
+    // Last resort: the latest media that went past in this chat (reply-to-view-once flow).
+    if (typeof ctx.lastMediaInChat === 'function') {
+        const last = ctx.lastMediaInChat();
+        if (last) remember(last.id, last.message);
+    }
+
+    for (const suspect of suspects) {
+        const cachedMedia = findMedia(suspect.message);
+        if (!cachedMedia) continue;
+        try {
+            return packMedia(cachedMedia, await downloadMedia(ctx.sock, suspect.message, suspect.key));
+        } catch (error) {
+            logger.warn(`cached media download failed (${error.message})`);
+        }
+    }
+
+    throw planError('missing_media', media
+        ? 'that media is no longer downloadable'
+        : 'no media found in that message');
 }
 
 function statusContent(ctx) {
