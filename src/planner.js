@@ -468,16 +468,11 @@ const handlers = {
         return { ok: true };
     },
 
-    /** Native single-select list, same envelope the bug bot used. */
+    /** Native single-select, built exactly like the bug bot's MenuCard helper. */
     async select(ctx, args) {
         const makeRow = (row) => {
-            const out = {
-                title: String(row.title || row.id),
-                id: String(row.id),
-            };
-            // description renders as the grey line under the row title.
+            const out = { title: String(row.title || row.id), id: String(row.id) };
             if (row.description) out.description = String(row.description);
-            if (row.header) out.header = String(row.header);
             return out;
         };
 
@@ -508,19 +503,19 @@ const handlers = {
             ? args.sections
                 .map((section) => {
                     const built = {
-                        title: String((section && section.title) || '').slice(0, 24),
+                        title: String((section && section.title) || ''),
                         rows: (Array.isArray(section && section.rows) ? section.rows : [])
                             .filter((row) => row && row.id)
                             .map(makeRow)
                             .slice(0, 10),
                     };
-                    // Per-section chip. WhatsApp picks the colour; we only give the text.
-                    const label = String((section && (section.highlight_label || section.highlightLabel)) || '').slice(0, 20);
+                    // Per-section chip. WhatsApp paints the colour, we only give the text.
+                    const label = String((section && (section.highlight_label || section.highlightLabel)) || '');
                     if (label) built.highlight_label = label;
                     return built;
                 })
                 .filter((section) => section.rows.length)
-                .slice(0, 8)
+                .slice(0, 10)
             : null;
 
         if (!sections) {
@@ -531,25 +526,21 @@ const handlers = {
         }
 
         const baileys = require('@whiskeysockets/baileys');
-        const { generateWAMessageFromContent, proto } = baileys;
-        if (!generateWAMessageFromContent || !proto) throw planError('select_unsupported', 'interactive messages need a newer baileys');
+        const { generateWAMessageFromContent } = baileys;
+        if (!generateWAMessageFromContent) throw planError('select_unsupported', 'interactive messages need a newer baileys');
 
-        const body = String(args.text || '');
+        const body = String(args.text || '') || ' ';
         const footer = String(args.footer || '');
-        const headerTitle = String(args.headerTitle || '').slice(0, 60);
         const buttonTitle = String(args.buttonTitle || 'SELECT').slice(0, 24);
-        const sectionTitle = String(args.sectionTitle || 'OPTIONS').slice(0, 24);
-        const Interactive = proto.Message.InteractiveMessage;
+        const sectionTitle = String(args.sectionTitle || '');
+        const headerTitle = String(args.headerTitle || '');
 
-        const interactive = Interactive.create({
-            body: Interactive.Body.create({ text: body }),
-            footer: Interactive.Footer.create({ text: footer }),
-            header: Interactive.Header.create({
-                title: headerTitle,
-                subtitle: '',
-                hasMediaAttachment: false,
-            }),
-            nativeFlowMessage: Interactive.NativeFlowMessage.create({
+        const card = {
+            header: { title: headerTitle, subtitle: '', hasMediaAttachment: false },
+            body: { text: body },
+            footer: { text: footer },
+            nativeFlowMessage: {
+                messageParamsJson: JSON.stringify({}),
                 buttons: [
                     {
                         name: 'single_select',
@@ -559,24 +550,13 @@ const handlers = {
                         }),
                     },
                 ],
-            }),
-        });
-
-        const built = generateWAMessageFromContent(
-            ctx.chat,
-            {
-                viewOnceMessage: {
-                    message: {
-                        messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
-                        interactiveMessage: interactive,
-                    },
-                },
             },
-            { userJid: ctx.sock.user?.id }
-        );
+        };
+
+        const built = generateWAMessageFromContent(ctx.chat, { interactiveMessage: card }, {});
 
         try {
-            // Native flow buttons are dropped unless the stanza carries the biz node.
+            // Native flow is dropped silently unless the stanza carries the biz node.
             await ctx.sock.relayMessage(ctx.chat, built.message, {
                 messageId: built.key.id,
                 additionalNodes: [
@@ -601,15 +581,12 @@ const handlers = {
         } catch (error) {
             // Never leave the chat with a dead picker: print the same list as text.
             logger.warn(`select relay failed: ${error.message} — falling back to text`);
-            const flat = sections
-                ? sections.flatMap((section) => section.rows)
-                : rows;
+            const flat = sections ? sections.flatMap((section) => section.rows) : rows;
             const list = flat.map((row) => `${row.id}${row.description ? ` — ${row.description}` : ''}`).join('\n');
-            await ctx.reply(body ? `${body}\n\n${list}` : list);
+            await ctx.reply(body.trim() ? `${body}\n\n${list}` : list);
             return { ok: true, rows: flat.length, fallback: 'text' };
         }
     },
-
     async media(ctx, args, vars) {
         const source = resolveSource(args.source || {}, vars);
         const kind = args.kind && args.kind !== 'auto' ? args.kind : source.kind || 'image';
