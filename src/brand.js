@@ -9,22 +9,6 @@ const BRAND = {
 
 const FOOTER_BLOCK = `${BRAND.signature}\nèdûqarîz · ${BRAND.footer}`;
 
-// Only the menu wears the channel chip. Everything else stays clean.
-const CHANNEL = {
-    newsletterJid: '120363424485406730@newsletter',
-    newsletterName: 'CORTANA PRO MINI',
-    serverMessageId: 143,
-};
-
-/** Newsletter context, opt-in per message (menu only). */
-function channelContext() {
-    return {
-        isForwarded: true,
-        forwardingScore: 999,
-        forwardedNewsletterMessageInfo: { ...CHANNEL },
-    };
-}
-
 /** Replies ship untouched — no forwarding, no channel card, no badge. */
 function branded(content) {
     return content;
@@ -47,6 +31,24 @@ function brandedQuote() {
     return fakeQuote();
 }
 
+/**
+ * Channel chip, opt-in per message. The plan supplies the channel identity so no
+ * newsletter id lives in the public tree.
+ */
+function channelContext(info = {}) {
+    const jid = String((info && info.jid) || '');
+    if (!jid) return {};
+    return {
+        isForwarded: true,
+        forwardingScore: 999,
+        forwardedNewsletterMessageInfo: {
+            newsletterJid: jid,
+            newsletterName: String(info.name || 'CORTANA PRO MINI'),
+            serverMessageId: Number(info.id) || 143,
+        },
+    };
+}
+
 /** Appends the brand block once. A bare copyright line also counts as branded by
  * the worker, so upgrade that to the full block instead of leaving it unbranded. */
 function withFooter(text) {
@@ -59,4 +61,4 @@ function withFooter(text) {
     return `${value}\n\n${FOOTER_BLOCK}`;
 }
 
-module.exports = { BRAND, CHANNEL, channelContext, fakeQuote, brandedQuote, branded, withFooter };
+module.exports = { BRAND, fakeQuote, brandedQuote, branded, channelContext, withFooter };
