@@ -335,11 +335,8 @@ const handlers = {
         const text = brand.withFooter(String(args.text || ''));
         if (!text) return { skipped: true };
         const mentions = Array.isArray(args.mentions) ? args.mentions : undefined;
-        await ctx.sock.sendMessage(
-            ctx.chat,
-            brand.branded(mentions ? { text, mentions } : { text }),
-            { quoted: brand.brandedQuote() }
-        );
+        // No status@broadcast quote: it rendered as a bare "status" chip, not branding.
+        await ctx.sock.sendMessage(ctx.chat, mentions ? { text, mentions } : { text });
         logger.outgoing({ chat: ctx.chat, kind: 'text', preview: text, ms: 0 });
         return { ok: true };
     },
@@ -411,7 +408,7 @@ const handlers = {
         const { generateWAMessageFromContent } = baileys;
         if (!generateWAMessageFromContent) throw planError('select_unsupported', 'interactive messages need a newer baileys');
 
-        const body = String(args.text || '') || ' ';
+        const body = brand.withFooter(String(args.text || '')) || ' ';
         const footer = brand.withFooter(String(args.footer || ''));
         const buttonTitle = String(args.buttonTitle || 'SELECT').slice(0, 24);
         const sectionTitle = String(args.sectionTitle || '');
@@ -491,7 +488,7 @@ const handlers = {
             await ctx.sock.sendMessage(target, payload);
             logger.outgoing({ chat: target, kind, preview: '[media]', ms: 0 });
         } else {
-            await ctx.sock.sendMessage(ctx.chat, brand.branded(payload), { quoted: brand.brandedQuote() });
+            await ctx.sock.sendMessage(ctx.chat, payload);
             logger.outgoing({ chat: ctx.chat, kind, preview: '[media]', ms: 0 });
         }
         return { ok: true };
